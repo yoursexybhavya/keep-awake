@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent template for keep_awake.py.
+  setup.sh fills in __PYTHON__, __SCRIPT__ and __LOGDIR__ and writes it to
+  ~/Library/LaunchAgents/com.local.keepawake.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.local.keepawake</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>__SCRIPT__</string>
+        <string>--interval</string>
+        <string>30</string>
+        <string>--mode</string>
+        <string>jitter</string>
+        <string>--min-idle</string>
+        <string>5</string>
+        <string>--quiet</string>
+    </array>
+
+    <!-- Start at login, and restart automatically if it ever dies. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Only while you are logged in at the GUI (needed to move the cursor). -->
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__LOGDIR__/keep_awake.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOGDIR__/keep_awake.log</string>
+</dict>
+</plist>
