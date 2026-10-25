@@ -25,6 +25,7 @@ final class Settings {
         case wiggle = "Visible wiggle"
         case roam   = "Roam the screen"
         case warp   = "Silent reposition (no event)"
+        case scroll = "Scroll wheel down"
     }
 
     @objc dynamic var enabled: Bool = true { didSet { save() } }
@@ -32,6 +33,7 @@ final class Settings {
     @objc dynamic var onlyWhenIdle: Bool = true { didSet { save() } }
     @objc dynamic var idleThreshold: Double = 5 { didSet { save() } }
     @objc dynamic var distance: Double = 1 { didSet { save() } }
+    @objc dynamic var scrollLines: Int = 3 { didSet { save() } }
     @objc dynamic var launchAtLogin: Bool = false { didSet { applyLaunchAtLogin(); save() } }
     @objc dynamic var modeRaw: String = Mode.jitter.rawValue { didSet { save() } }
 
@@ -47,6 +49,7 @@ final class Settings {
         if defaults.object(forKey: "onlyWhenIdle") != nil { onlyWhenIdle = defaults.bool(forKey: "onlyWhenIdle") }
         if defaults.object(forKey: "idleThreshold") != nil { idleThreshold = defaults.double(forKey: "idleThreshold") }
         if defaults.object(forKey: "distance") != nil { distance = defaults.double(forKey: "distance") }
+        if defaults.object(forKey: "scrollLines") != nil { scrollLines = defaults.integer(forKey: "scrollLines") }
         if defaults.object(forKey: "launchAtLogin") != nil { launchAtLogin = defaults.bool(forKey: "launchAtLogin") }
         if let raw = defaults.string(forKey: "mode"), Mode(rawValue: raw) != nil { modeRaw = raw }
     }
@@ -57,6 +60,7 @@ final class Settings {
         defaults.set(onlyWhenIdle, forKey: "onlyWhenIdle")
         defaults.set(idleThreshold, forKey: "idleThreshold")
         defaults.set(distance, forKey: "distance")
+        defaults.set(scrollLines, forKey: "scrollLines")
         defaults.set(launchAtLogin, forKey: "launchAtLogin")
         defaults.set(modeRaw, forKey: "mode")
     }
@@ -140,6 +144,16 @@ final class CursorNudger {
         case .warp:
             let dx = (step % 2 == 0) ? s.distance : -s.distance
             CGWarpMouseCursorPosition(CGPoint(x: here.x + dx, y: here.y))
+            return
+
+        case .scroll:
+            // A genuine wheel event — exactly what the middle button produces.
+            // Scrolls whatever window is under the cursor, once per interval.
+            if let ev = CGEvent(scrollWheelEventSource: nil, units: .line,
+                                wheelCount: 1, wheel1: Int32(s.scrollLines),
+                                wheel2: 0, wheel3: 0) {
+                ev.post(tap: .cghidEventTap)
+            }
             return
         }
 
@@ -234,6 +248,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         modeItem.submenu = modeMenu
         menu.addItem(modeItem)
 
+        // Scroll amount — only relevant in scroll mode
+        if s.mode == .scroll {
+            let scrollItem = NSMenuItem(title: "Scroll amount", action: nil, keyEquivalent: "")
+            let scrollMenu = NSMenu()
+            for n in [1, 3, 5, 10, 20] {
+                let mi = NSMenuItem(title: n == 1 ? "1 line per interval" : "\(n) lines per interval",
+                                    action: #selector(pickScrollLines(_:)), keyEquivalent: "")
+                mi.target = self
+                mi.representedObject = n
+                mi.state = (s.scrollLines == n) ? .on : .off
+                scrollMenu.addItem(mi)
+            }
+            scrollItem.submenu = scrollMenu
+            menu.addItem(scrollItem)
+        }
+
         // Only-when-idle
         let idleItem = NSMenuItem(title: "Only when I'm idle",
                                   action: #selector(toggleIdleOnly), keyEquivalent: "")
@@ -316,6 +346,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func pickMode(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String else { return }
         Settings.shared.modeRaw = raw
+        rebuildMenu()
+    }
+
+    @objc private func pickScrollLines(_ sender: NSMenuItem) {
+        guard let n = sender.representedObject as? Int else { return }
+        Settings.shared.scrollLines = n
         rebuildMenu()
     }
 

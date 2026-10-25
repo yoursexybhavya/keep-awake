@@ -86,6 +86,10 @@ python3 keep_awake.py --help                    # everything
 - `wiggle` — an obvious left-right shake. Use this if a stubborn watcher still
   reports you as idle (some read *pointer displacement* rather than the timer).
 - `roam` — moves the cursor to a different part of the screen each time.
+- `scroll` — turns the mouse wheel once per interval (a real
+  `CGEventScrollWheelEvent`, identical to your middle button). Scrolls
+  whatever window is under the cursor, N lines per tick:
+  `--mode scroll --scroll-lines 5` (negative scrolls up).
 - `warp` — repositions the cursor **without** posting an event. Only for
   watchers that poll cursor coordinates instead of the idle timer.
 
@@ -137,7 +141,10 @@ If `swiftc` is missing, the build script triggers
   cup also changes (filled = ON, outline = OFF) so you can see the state
   without opening the menu. `⌘P`
 - **Interval** — 1 / 2 / 5 / 10 / 15 / 20 / 30 / 45 / 60 / 120 seconds
-- **Movement** — Jitter · Tiny circle · Visible wiggle · Roam · Silent warp
+- **Movement** — Jitter · Tiny circle · Visible wiggle · Roam · Silent warp ·
+  **Scroll wheel down** (with a *Scroll amount* submenu: 1–20 lines per
+  interval). Heads-up: a wheel event really scrolls the window under your
+  cursor — park the pointer over something scroll-safe first.
 - **Only when I'm idle** — on by default, so it never fights your own mouse
 - **Start at login** — survives reboots
 - **Nudge now** — test it on demand. `⌘N`

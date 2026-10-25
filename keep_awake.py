@@ -39,6 +39,7 @@ try:
     from Quartz import (
         CGDisplayBounds,
         CGEventCreateMouseEvent,
+        CGEventCreateScrollWheelEvent,
         CGEventPost,
         CGEventSourceSecondsSinceLastEventType,
         CGMainDisplayID,
@@ -49,6 +50,7 @@ try:
         kCGHIDEventTap,
         kCGMouseButtonLeft,
         kCGNullEventSource,
+        kCGScrollEventUnitLine,
     )
     try:
         # Only present when ScreenTime/DisplayServices are available; optional.
@@ -86,6 +88,17 @@ def post_move(x: float, y: float) -> None:
     )
     if event is None:
         raise RuntimeError("CGEventCreateMouseEvent returned NULL")
+    CGEventPost(kCGHIDEventTap, event)
+
+
+def post_scroll(lines: int) -> None:
+    """Inject a real scroll-wheel event — identical to turning the middle
+    button's wheel by `lines` notches. Positive = down, negative = up."""
+    event = CGEventCreateScrollWheelEvent(
+        kCGNullEventSource, kCGScrollEventUnitLine, 1, lines
+    )
+    if event is None:
+        raise RuntimeError("CGEventCreateScrollWheelEvent returned NULL")
     CGEventPost(kCGHIDEventTap, event)
 
 
@@ -213,16 +226,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--mode",
-        choices=["jitter", "circle", "wiggle", "roam", "warp"],
+        choices=["jitter", "circle", "wiggle", "roam", "warp", "scroll"],
         default="jitter",
         help="jitter/invisible=1px hop, circle=tiny orbit, wiggle=visible shake, "
-        "roam=drift around screen, warp=silent reposition (no event)",
+        "roam=drift around screen, warp=silent reposition (no event), "
+        "scroll=turn the mouse wheel down every interval",
     )
     p.add_argument(
         "--distance",
         type=float,
         default=1.0,
         help="how far the cursor moves per nudge, in points",
+    )
+    p.add_argument(
+        "--scroll-lines",
+        type=int,
+        default=3,
+        help="with --mode scroll: wheel notches (lines) scrolled per interval; "
+        "negative scrolls up",
     )
     p.add_argument(
         "--always",
@@ -267,6 +288,9 @@ def main() -> int:
     def nudge() -> str:
         nonlocal rect
         rect = screen_rect()  # display arrangement can change
+        if args.mode == "scroll":
+            post_scroll(args.scroll_lines)
+            return f"wheel {args.scroll_lines:+d} lines"
         x, y = nudger.next_point(rect)
         if args.mode == "warp":
             warp(x, y)
@@ -285,7 +309,10 @@ def main() -> int:
         print("=" * 62)
         print("  KEEP AWAKE — anti-AFK cursor nudger")
         print("=" * 62)
-        print(f"  mode      : {args.mode} ({args.distance:g} pt per nudge)")
+        if args.mode == "scroll":
+            print(f"  mode      : scroll (wheel {args.scroll_lines:+d} lines per tick)")
+        else:
+            print(f"  mode      : {args.mode} ({args.distance:g} pt per nudge)")
         print(f"  interval  : every {interval:g}s")
         print(f"  trigger   : {'always' if args.always else f'only after {args.min_idle:g}s idle'}")
         print(f"  duration  : {mins}")
