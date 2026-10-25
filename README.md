@@ -1,10 +1,5 @@
 # ☕ Keep Awake — anti-AFK cursor nudger for macOS
 
-[![macOS](https://img.shields.io/badge/macOS-11%2B-blue?logo=apple)](https://apple.com)
-[![Swift](https://img.shields.io/badge/Swift-Native%20Menu%20Bar-orange?logo=swift)](menubar/KeepAwake.swift)
-[![Python](https://img.shields.io/badge/Python-CLI%20%26%20Agent-yellow?logo=python)](keep_awake.py)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
 Your Mac marks you **AFK / Away** as soon as the mouse stops moving, and so do
 Teams, Slack, Zoom and most corporate presence or monitoring agents. They all
 read the same thing: *"how many seconds since the last mouse or keyboard
@@ -32,7 +27,8 @@ version uses `pyobjc-framework-Quartz`, which Apple's own Python ships with.
 
 ## 0. The easiest way — the installer .dmg
 
-`Keep-Awake-1.0.dmg` is included in this repository (and attached to [Releases](../../releases)). Double-click it, then double-click **Install Keep Awake**:
+`Keep-Awake-1.0.dmg` (one level up from this folder) is a standard Apple Disk
+Image. Double-click it, then double-click **Install Keep Awake**:
 
 - If Apple's free Command Line Tools are present it compiles and installs the
   menu-bar app into `/Applications` and launches it (☕ icon).
@@ -53,7 +49,6 @@ bash "/Volumes/Keep Awake/Install Keep Awake.app/Contents/MacOS/installer"
 ## 1. The quick way (terminal)
 
 ```bash
-git clone https://github.com/yoursexybhavya/keep-awake.git
 cd keep-awake
 ./setup.sh            # checks Python, does a self-test, prints your options
 ```
@@ -128,6 +123,7 @@ tail -f ~/Library/Logs/keep_awake.log                # watch the log
 Compiles a real `Keep Awake.app` with a ☕ icon in your menu bar.
 
 ```bash
+cd keep-awake
 ./menubar/build.sh          # builds "Keep Awake.app" (needs Xcode Command Line Tools)
 ./menubar/install-app.sh    # copies it to /Applications and launches it
 ```
@@ -137,13 +133,15 @@ If `swiftc` is missing, the build script triggers
 
 **In the menu you get:**
 
-- **Pause / Resume nudging** — instant kill switch
-- **Interval** — 10 / 15 / 20 / 30 / 45 / 60 / 120 seconds
+- **Nudging: ON / OFF** — the power switch. One click flips it; the menu-bar
+  cup also changes (filled = ON, outline = OFF) so you can see the state
+  without opening the menu. `⌘P`
+- **Interval** — 1 / 2 / 5 / 10 / 15 / 20 / 30 / 45 / 60 / 120 seconds
 - **Movement** — Jitter · Tiny circle · Visible wiggle · Roam · Silent warp
 - **Only when I'm idle** — on by default, so it never fights your own mouse
 - **Start at login** — survives reboots
-- **Nudge now** — test it on demand
-- A live status line showing your current idle seconds and nudge count
+- **Nudge now** — test it on demand. `⌘N`
+- A live status line showing ON/OFF, your current idle seconds and nudge count
 
 Settings are stored in `UserDefaults`, so they persist between launches.
 

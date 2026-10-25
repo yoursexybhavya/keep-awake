@@ -168,18 +168,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            if let img = NSImage(systemSymbolName: "cup.and.saucer.fill",
-                                 accessibilityDescription: "Keep Awake") {
-                img.isTemplate = true
-                button.image = img
-            } else {
-                button.title = "☕️"
-            }
-            button.toolTip = "Keep Awake — anti-AFK cursor nudger"
-        }
+        updateStatusIcon()
         rebuildMenu()
         startTimer()
+    }
+
+    /// Filled cup = ON, outline cup (or 💤) = OFF, so the state reads at a glance.
+    private func updateStatusIcon() {
+        guard let button = statusItem.button else { return }
+        let on = Settings.shared.enabled
+        if let img = NSImage(systemSymbolName: on ? "cup.and.saucer.fill" : "cup.and.saucer",
+                             accessibilityDescription: "Keep Awake") {
+            img.isTemplate = true
+            button.image = img
+        } else {
+            button.title = on ? "☕️" : "💤"
+        }
+        button.toolTip = on ? "Keep Awake — ON (nudges while you're idle)"
+                            : "Keep Awake — OFF (cursor untouched)"
     }
 
     // MARK: Menu
@@ -193,7 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(header)
         menu.addItem(.separator())
 
-        let toggle = NSMenuItem(title: s.enabled ? "Pause nudging" : "Resume nudging",
+        let toggle = NSMenuItem(title: s.enabled ? "Nudging: ON" : "Nudging: OFF",
                                 action: #selector(toggleEnabled), keyEquivalent: "p")
         toggle.target = self
         toggle.state = s.enabled ? .on : .off
@@ -204,8 +210,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Interval submenu
         let intervalItem = NSMenuItem(title: "Interval", action: nil, keyEquivalent: "")
         let intervalMenu = NSMenu()
-        for secs: Double in [10, 15, 20, 30, 45, 60, 120] {
-            let mi = NSMenuItem(title: "\(Int(secs)) seconds",
+        for secs: Double in [1, 2, 5, 10, 15, 20, 30, 45, 60, 120] {
+            let mi = NSMenuItem(title: secs == 1 ? "1 second" : "\(Int(secs)) seconds",
                                 action: #selector(pickInterval(_:)), keyEquivalent: "")
             mi.target = self
             mi.representedObject = secs
@@ -257,11 +263,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func statusLine() -> String {
         let s = Settings.shared
-        if !s.enabled { return "Keep Awake — paused" }
+        if !s.enabled { return "Keep Awake — OFF (cursor untouched)" }
         let idle = CursorNudger.shared.secondsSinceInput()
-        let count = nudgeCount
         let last = lastNudgeAt.map { fmt($0) } ?? "—"
-        return "Keep Awake — active\nidle \(Int(idle))s · \(count) nudges · last \(last)"
+        return "Keep Awake — ON · idle \(Int(idle))s · \(nudgeCount) nudges · last \(last)"
     }
 
     private func fmt(_ d: Date) -> String {
@@ -276,7 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         timer?.invalidate()
         let iv = max(1.0, Settings.shared.interval)
         let t = Timer(timeInterval: iv, repeats: true) { [weak self] _ in self?.tick() }
-        t.tolerance = 1.0
+        t.tolerance = max(0.05, iv * 0.1)
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
@@ -297,6 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleEnabled() {
         Settings.shared.enabled.toggle()
+        updateStatusIcon()
         rebuildMenu()
     }
 

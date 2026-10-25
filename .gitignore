@@ -1,18 +1,5 @@
-# OS files
-.DS_Store
-*.swp
-*~
-
-# Build artifacts & temporary directories
-stage.iso
-dmg-build/stage/
-menubar/Keep\ Awake.app/
-*.app/
-KeepAwake
 __pycache__/
-*.py[cod]
-.venv/
-env/
-
-# Logs
-*.log
+*.pyc
+.DS_Store
+*.iso
+stage/
