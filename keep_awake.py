@@ -47,6 +47,8 @@ try:
         CGPointMake,
         kCGAnyInputEventType,
         kCGEventMouseMoved,
+        kCGEventLeftMouseDown,
+        kCGEventLeftMouseUp,
         kCGHIDEventTap,
         kCGMouseButtonLeft,
         kCGNullEventSource,
@@ -100,6 +102,21 @@ def post_scroll(lines: int) -> None:
     if event is None:
         raise RuntimeError("CGEventCreateScrollWheelEvent returned NULL")
     CGEventPost(kCGHIDEventTap, event)
+
+
+def post_click(x: float, y: float) -> None:
+    """Inject a real left-button press+release at (x, y) — identical to a
+    physical click. Beware: it clicks whatever is under the point."""
+    down = CGEventCreateMouseEvent(
+        kCGNullEventSource, kCGEventLeftMouseDown, CGPointMake(x, y), kCGMouseButtonLeft
+    )
+    up = CGEventCreateMouseEvent(
+        kCGNullEventSource, kCGEventLeftMouseUp, CGPointMake(x, y), kCGMouseButtonLeft
+    )
+    if down is None or up is None:
+        raise RuntimeError("CGEventCreateMouseEvent returned NULL")
+    CGEventPost(kCGHIDEventTap, down)
+    CGEventPost(kCGHIDEventTap, up)
 
 
 def warp(x: float, y: float) -> None:
@@ -227,16 +244,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--mode",
         choices=["jitter", "circle", "wiggle", "roam", "warp", "scroll"],
-        default="jitter",
-        help="jitter/invisible=1px hop, circle=tiny orbit, wiggle=visible shake, "
-        "roam=drift around screen, warp=silent reposition (no event), "
-        "scroll=turn the mouse wheel down every interval",
+        default="wiggle",
+        help="wiggle=visible shake (default), jitter=invisible 1px hop, "
+        "circle=tiny orbit, roam=drift around screen, warp=silent reposition "
+        "(no event), scroll=turn the mouse wheel down every interval",
     )
     p.add_argument(
         "--distance",
         type=float,
-        default=1.0,
-        help="how far the cursor moves per nudge, in points",
+        default=12.0,
+        help="how far the cursor moves per nudge, in points (visible >= ~6)",
     )
     p.add_argument(
         "--scroll-lines",
@@ -244,6 +261,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=3,
         help="with --mode scroll: wheel notches (lines) scrolled per interval; "
         "negative scrolls up",
+    )
+    p.add_argument(
+        "--auto-click",
+        action="store_true",
+        help="also inject a real left click on its own timer (defeats watchers "
+        "that ignore movement but count clicks)",
+    )
+    p.add_argument(
+        "--click-interval",
+        type=float,
+        default=5.0,
+        help="seconds between auto-clicks (default 5)",
+    )
+    p.add_argument(
+        "--click-point",
+        default=None,
+        metavar="X,Y",
+        help="click at this fixed screen point instead of the cursor position "
+        "(safer: park it over empty desktop)",
     )
     p.add_argument(
         "--always",
@@ -314,50 +350,82 @@ def main() -> int:
         else:
             print(f"  mode      : {args.mode} ({args.distance:g} pt per nudge)")
         print(f"  interval  : every {interval:g}s")
+        if args.auto_click:
+            at = args.click_point or "cursor position"
+            print(f"  auto-click: every {args.click_interval:g}s at {at}")
         print(f"  trigger   : {'always' if args.always else f'only after {args.min_idle:g}s idle'}")
         print(f"  duration  : {mins}")
         print(f"  screen    : {rect.size.width:.0f}x{rect.size.height:.0f}")
         print("  press Ctrl+C to stop")
         print("-" * 62)
 
-    nudges = skipped = 0
+    nudges = skipped = clicks = 0
     next_tick = time.time()
+    do_click = args.auto_click
+    click_iv = max(1.0, args.click_interval)
+    next_click = time.time() + click_iv
+    click_pt = None
+    if args.click_point:
+        cx, cy = args.click_point.replace(" ", "").split(",")
+        click_pt = (float(cx), float(cy))
+
+    def do_auto_click() -> None:
+        nonlocal clicks
+        pt = click_pt or current_position()
+        post_click(pt[0], pt[1])
+        clicks += 1
+        if not args.quiet:
+            print(f"  [{time.strftime('%H:%M:%S')}] click #{clicks} at {pt[0]:.0f},{pt[1]:.0f}")
 
     while not stop["flag"]:
         now = time.time()
-        if now < next_tick:
-            time.sleep(min(0.25, next_tick - now))
+        wake = min(next_tick, next_click) if do_click else next_tick
+        if now < wake:
+            time.sleep(min(0.25, wake - now))
             continue
-        next_tick = now + interval
 
         if run_for and (now - started) >= run_for:
             if not args.quiet:
                 print(f"\n  Reached the {run_for / 60:.0f} min limit — stopping.")
             break
 
-        if not args.always:
-            idle = seconds_since_any_input()
-            if idle < args.min_idle:
+        idle = None if args.always else seconds_since_any_input()
+        user_active = idle is not None and idle < args.min_idle
+
+        if now >= next_tick:
+            next_tick = now + interval
+            if user_active:
                 skipped += 1
                 if not args.quiet:
                     print(f"  [{time.strftime('%H:%M:%S')}] you're active (idle {idle:.0f}s) — skipping")
-                continue
+            else:
+                try:
+                    where = nudge()
+                except Exception as exc:
+                    print(f"  nudge failed: {exc}", file=sys.stderr)
+                    time.sleep(5)
+                    where = None
+                if where is not None:
+                    nudges += 1
+                    if not args.quiet:
+                        print(f"  [{time.strftime('%H:%M:%S')}] nudge #{nudges} -> {where}")
 
-        try:
-            where = nudge()
-        except Exception as exc:
-            print(f"  nudge failed: {exc}", file=sys.stderr)
-            time.sleep(5)
-            continue
-
-        nudges += 1
-        if not args.quiet:
-            print(f"  [{time.strftime('%H:%M:%S')}] nudge #{nudges} -> {where}")
+        if do_click and now >= next_click:
+            next_click = now + click_iv
+            if user_active:
+                if not args.quiet:
+                    print(f"  [{time.strftime('%H:%M:%S')}] click skipped — you're active")
+            else:
+                try:
+                    do_auto_click()
+                except Exception as exc:
+                    print(f"  click failed: {exc}", file=sys.stderr)
 
     if not args.quiet:
         elapsed = time.time() - started
         print("-" * 62)
-        print(f"  Stopped after {elapsed / 60:.1f} min — {nudges} nudges, {skipped} skipped.")
+        print(f"  Stopped after {elapsed / 60:.1f} min — {nudges} nudges, "
+              f"{clicks} clicks, {skipped} skipped.")
     return 0
 
 

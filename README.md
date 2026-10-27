@@ -81,10 +81,10 @@ python3 keep_awake.py --help                    # everything
 
 **Movement modes**
 
-- `jitter` *(default)* — 1-point hop left/right. You will not see it.
+- `wiggle` *(default since v1.3)* — a visible left-right shake, then back home.
+  You can *see* it working, and displacement-based watchers reset on it.
+- `jitter` — 1-point hop left/right. Invisible; use only if you must not see it.
 - `circle` — a tiny orbit around the current position.
-- `wiggle` — an obvious left-right shake. Use this if a stubborn watcher still
-  reports you as idle (some read *pointer displacement* rather than the timer).
 - `roam` — moves the cursor to a different part of the screen each time.
 - `scroll` — turns the mouse wheel once per interval (a real
   `CGEventScrollWheelEvent`, identical to your middle button). Scrolls
@@ -92,6 +92,20 @@ python3 keep_awake.py --help                    # everything
   `--mode scroll --scroll-lines 5` (negative scrolls up).
 - `warp` — repositions the cursor **without** posting an event. Only for
   watchers that poll cursor coordinates instead of the idle timer.
+
+**Auto-click (defeats watchers that ignore movement)**
+
+Some corporate agents ignore synthetic mouse *movement* but count *clicks*.
+Add a real left click on its own timer:
+
+```bash
+python3 keep_awake.py --auto-click                      # click every 5 s at the cursor
+python3 keep_awake.py --auto-click --click-interval 2   # every 2 s
+python3 keep_awake.py --auto-click --click-point 60,900 # click a FIXED safe point
+```
+
+⚠️ A click activates whatever is under it. Prefer `--click-point` parked over
+empty desktop, or accept the risk of clicking at the cursor.
 
 ### Run it in the background
 
@@ -141,14 +155,26 @@ If `swiftc` is missing, the build script triggers
   cup also changes (filled = ON, outline = OFF) so you can see the state
   without opening the menu. `⌘P`
 - **Interval** — 1 / 2 / 5 / 10 / 15 / 20 / 30 / 45 / 60 / 120 seconds
-- **Movement** — Jitter · Tiny circle · Visible wiggle · Roam · Silent warp ·
-  **Scroll wheel down** (with a *Scroll amount* submenu: 1–20 lines per
-  interval). Heads-up: a wheel event really scrolls the window under your
-  cursor — park the pointer over something scroll-safe first.
+- **Movement** — Visible wiggle (default) · Jitter · Tiny circle · Roam ·
+  Silent warp · **Scroll wheel down** (with a *Scroll amount* submenu:
+  1–20 lines per interval). Heads-up: a wheel event really scrolls the
+  window under your cursor — park the pointer over something scroll-safe first.
 - **Only when I'm idle** — on by default, so it never fights your own mouse
-- **Start at login** — survives reboots
+- **Auto-click: ON / OFF** — injects a real left click on its own timer
+  (default every 5 s), with *Click interval* (2/5/10/30 s) and *Click at:
+  cursor / saved point* plus *Save cursor position as click point*. Use the
+  saved point parked over empty desktop so clicks hit nothing important.
+- **Start at login** — survives reboots. Uses Apple's SMAppService and, if
+  that refuses (common for ad-hoc-signed apps), automatically falls back to a
+  user LaunchAgent at `~/Library/LaunchAgents/local.keepawake.menubar.plist`.
 - **Nudge now** — test it on demand. `⌘N`
-- A live status line showing ON/OFF, your current idle seconds and nudge count
+- **Why am I still AFK? Run diagnostics…** — `⌘D`. Forces a nudge, measures
+  whether macOS's idle timer actually resets, counts skips, and tells you
+  which class of watcher you're dealing with. `⌘D`
+- **Reset settings to defaults** — one click back to sane v1.3 defaults
+  (visible wiggle, 12 pt, 30 s).
+- A live status line showing ON/OFF, idle seconds, nudge and click counts
+- Everything is also logged to `~/Library/Logs/KeepAwake.log`
 
 Settings are stored in `UserDefaults`, so they persist between launches.
 
@@ -195,8 +221,28 @@ been hands-off for 5 s. Force it with `--always` if you want constant movement.
 Positions are clamped 12 pt inside the display bounds, and `jitter` alternates
 direction so the net drift is zero. If you use `roam`, switch to `jitter`.
 
+**Nothing seems to move / "the app isn't working".**
+Since v1.3 the default movement is a *visible* wiggle, so you should see the
+cursor shake once per interval while you're hands-off. If you installed an
+older version, its saved settings still say "invisible jitter" — use
+**Reset settings to defaults** in the menu (or pick *Movement → Visible
+wiggle*). The status line's nudge counter and `~/Library/Logs/KeepAwake.log`
+prove what the app is doing every tick.
+
 **A watcher still says I'm idle.**
-Some agents read pointer *displacement* or need a bigger jump. Try
+Run **Why am I still AFK? Run diagnostics…** (`⌘D`). It tells you which of
+three worlds you're in:
+
+1. *Idle timer doesn't reset* — something blocks synthetic input entirely
+   (rare; a security agent or MDM profile). No software jiggler can work.
+2. *Idle timer resets but your app still says away* — that app ignores
+   synthetic **movement**. Turn on **Auto-click** and/or **Scroll wheel**
+   mode: many watchers only accept click or wheel input.
+3. *Everything resets and it still says away* — the app tracks screenshots,
+   keystroke content, or window focus (anti-spoofing). No cursor tool of any
+   kind can satisfy it; only real interaction will.
+
+For displacement-reading watchers, bigger jumps help:
 `--mode wiggle --distance 25`, or `--mode roam`. A few read only keyboard
 input — for those, see below.
 
