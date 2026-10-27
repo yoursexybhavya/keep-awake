@@ -248,7 +248,7 @@ final class CursorNudger {
         case .scroll:
             // A genuine wheel event — exactly what the middle button produces.
             // Scrolls whatever window is under the cursor, once per interval.
-            if let ev = CGEvent(scrollWheelEventSource: nil, units: .line,
+            if let ev = CGEvent(scrollWheelEvent2Source: nil, units: .line,
                                 wheelCount: 1, wheel1: Int32(s.scrollLines),
                                 wheel2: 0, wheel3: 0) {
                 ev.post(tap: .cghidEventTap)
