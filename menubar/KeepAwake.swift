@@ -573,7 +573,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Settings.shared.applySleepAssertion()
         if Settings.shared.launchAtLogin { Settings.shared.applyLaunchAtLogin() }
 
-        Log.write("launched v1.4.2 — mode=\(Settings.shared.modeRaw) interval=\(Settings.shared.interval)s onlyWhenIdle=\(Settings.shared.onlyWhenIdle) jitter=\(Settings.shared.humanJitter) distance=\(Settings.shared.distance)pt preventSleep=\(Settings.shared.preventSleep)")
+        let opts: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+        let isTrusted = AXIsProcessTrustedWithOptions(opts)
+        Log.write("launched v1.4.2 — mode=\(Settings.shared.modeRaw) interval=\(Settings.shared.interval)s onlyWhenIdle=\(Settings.shared.onlyWhenIdle) jitter=\(Settings.shared.humanJitter) distance=\(Settings.shared.distance)pt preventSleep=\(Settings.shared.preventSleep) axTrusted=\(isTrusted)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -610,6 +612,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
+
+        if !AXIsProcessTrusted() {
+            let permItem = NSMenuItem(title: "⚠️ Grant Accessibility Permission...", action: #selector(openAccessibilitySettings), keyEquivalent: "")
+            permItem.target = self
+            menu.addItem(permItem)
+            menu.addItem(.separator())
+        }
 
         let toggle = NSMenuItem(title: s.enabled ? "Nudging: ON" : "Nudging: OFF",
                                 action: #selector(toggleEnabled), keyEquivalent: "p")
@@ -913,6 +922,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Settings.shared.clickInterval = v
         startClickTimer()
         rebuildMenu()
+    }
+
+    @objc private func openAccessibilitySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func toggleClickTarget() {
