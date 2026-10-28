@@ -24,7 +24,7 @@ cp -R "$BUNDLE" "$DEST"
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 
 echo "==> Launching..."
-open "$DEST"
+nohup "$DEST/Contents/MacOS/KeepAwake" >/dev/null 2>&1 &
 
 echo
 echo "Done. Look for the coffee-cup icon in your menu bar."

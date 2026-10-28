@@ -132,7 +132,8 @@ PLIST
 }
 
 launch_native() {
-  open "$APPDIR/Keep Awake.app" && say "==> Launched. Look for the coffee cup in your menu bar."
+  nohup "$APPDIR/Keep Awake.app/Contents/MacOS/KeepAwake" >/dev/null 2>&1 &
+  say "==> Launched. Look for the coffee cup in your menu bar."
 }
 
 # ---------------------------------------------------------------------------
