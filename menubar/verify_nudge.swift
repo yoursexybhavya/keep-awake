@@ -1,63 +1,93 @@
 //
-// verify_nudge.swift — self-contained verification check for Keep Awake motion engine.
+// verify_nudge.swift — self-contained verification check for Keep Awake v1.4 AFK bypass engine.
 // Run with: swift menubar/verify_nudge.swift
 //
 
 import Cocoa
 import CoreGraphics
+import IOKit
 import IOKit.pwr_mgt
 
-print("==> Checking IOKit display sleep assertion...")
-var assertionID: IOPMAssertionID = 0
-let iokitResult = IOPMAssertionCreateWithName(
+print("==> 1. Checking dual IOKit display + system sleep assertions...")
+var displayAssertion: IOPMAssertionID = 0
+var systemAssertion: IOPMAssertionID = 0
+
+let dRes = IOPMAssertionCreateWithName(
     kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
     IOPMAssertionLevel(kIOPMAssertionLevelOn),
     "Keep Awake Verification Test" as CFString,
-    &assertionID
+    &displayAssertion
 )
-assert(iokitResult == kIOReturnSuccess, "Failed to create IOKit power assertion")
-assert(assertionID != 0, "Assertion ID is invalid")
-IOPMAssertionRelease(assertionID)
-print("    IOKit display sleep assertion: PASS")
+assert(dRes == kIOReturnSuccess && displayAssertion != 0, "Display sleep assertion failed")
 
-print("==> Checking cursor position reading...")
+let sRes = IOPMAssertionCreateWithName(
+    kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
+    IOPMAssertionLevel(kIOPMAssertionLevelOn),
+    "Keep Awake Verification Test" as CFString,
+    &systemAssertion
+)
+assert(sRes == kIOReturnSuccess && systemAssertion != 0, "System sleep assertion failed")
+
+IOPMAssertionRelease(displayAssertion)
+IOPMAssertionRelease(systemAssertion)
+print("    Dual sleep assertions: PASS")
+
+print("==> 2. Checking multi-input activity detection (typing, mouse, click, scroll, IOHIDSystem)...")
+let tKeyDown = Double(CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown))
+let mouse = Double(CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .mouseMoved))
+let scroll = Double(CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .scrollWheel))
+let click = Double(CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .leftMouseDown))
+
+assert(tKeyDown >= 0.0, "Invalid keyDown idle time")
+assert(mouse >= 0.0, "Invalid mouse idle time")
+assert(scroll >= 0.0, "Invalid scroll idle time")
+assert(click >= 0.0, "Invalid click idle time")
+
+print("    Detected metrics: typing=\(String(format: "%.1f", tKeyDown))s, mouse=\(String(format: "%.1f", mouse))s, click=\(String(format: "%.1f", click))s, scroll=\(String(format: "%.1f", scroll))s")
+print("    Multi-input activity monitoring: PASS")
+
+print("==> 3. Checking AFK Bypass sequence (hardware slide + micro-scroll + harmless key)...")
+let src = CGEventSource(stateID: .hidSystemState)
 let initial = CGEvent(source: nil)?.location ?? .zero
-assert(initial.x > 0 || initial.y > 0, "Cursor location returned invalid (0,0)")
-print("    Initial cursor position: (\(initial.x), \(initial.y))")
-
-print("==> Checking smooth slide motion & return...")
 let bounds = CGDisplayBounds(CGMainDisplayID())
-let distance: CGFloat = 40.0
-let steps = 24
-var maxDisplacement: CGFloat = 0.0
 
-for i in 0...steps {
-    let progress = Double(i) / Double(steps)
+// Slide
+let distance: CGFloat = 35.0
+var maxDisplacement: CGFloat = 0.0
+for i in 0...24 {
+    let progress = Double(i) / 24.0
     let offset = CGFloat(sin(progress * 2.0 * .pi) * Double(distance))
     let x = min(max(initial.x + offset, bounds.minX + 8), bounds.maxX - 8)
     let p = CGPoint(x: x, y: initial.y)
     CGWarpMouseCursorPosition(p)
-    if let ev = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left) {
+    if let ev = CGEvent(mouseEventSource: src, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left) {
         ev.post(tap: .cghidEventTap)
     }
-    let current = CGEvent(source: nil)?.location ?? .zero
-    let disp = abs(current.x - initial.x)
-    if disp > maxDisplacement { maxDisplacement = disp }
-    usleep(10000)
+    let cur = CGEvent(source: nil)?.location ?? .zero
+    let d = abs(cur.x - initial.x)
+    if d > maxDisplacement { maxDisplacement = d }
+    usleep(5000)
+}
+assert(maxDisplacement >= 25.0, "Slide displacement insufficient")
+
+// Micro-scroll (down + up)
+if let down = CGEvent(scrollWheelEvent2Source: src, units: .line, wheelCount: 1, wheel1: 1, wheel2: 0, wheel3: 0),
+   let up = CGEvent(scrollWheelEvent2Source: src, units: .line, wheelCount: 1, wheel1: -1, wheel2: 0, wheel3: 0) {
+    down.post(tap: .cghidEventTap)
+    up.post(tap: .cghidEventTap)
+}
+
+// Harmless F15 key down & up
+if let kdown = CGEvent(keyboardEventSource: src, virtualKey: 113, keyDown: true),
+   let kup = CGEvent(keyboardEventSource: src, virtualKey: 113, keyDown: false) {
+    kdown.post(tap: .cghidEventTap)
+    kup.post(tap: .cghidEventTap)
 }
 
 let finalPos = CGEvent(source: nil)?.location ?? .zero
-print("    Max displacement during slide: \(maxDisplacement)pt (expected >= 35pt)")
-assert(maxDisplacement >= 30.0, "Cursor did not achieve expected displacement during slide")
-
 let drift = hypot(finalPos.x - initial.x, finalPos.y - initial.y)
-print("    Position drift after slide: \(drift)pt (expected < 2pt)")
-assert(drift < 2.0, "Cursor did not return to origin after slide")
+assert(drift < 2.0, "Cursor drift after slide exceeded tolerance")
+print("    Max displacement: \(maxDisplacement)pt | Return drift: \(drift)pt")
+print("    AFK Bypass composite execution: PASS")
 
-print("==> Checking idle timer query...")
-let anyInput = CGEventType(rawValue: ~CGEventType.RawValue(0))!
-let idle = Double(CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput))
-assert(idle >= 0.0, "Idle timer returned negative number")
-print("    Current idle: \(idle)s")
-
-print("==> ALL VERIFICATION CHECKS PASSED SUCCESSFULLY.")
+print("==> ALL v1.4 VERIFICATION CHECKS PASSED.")

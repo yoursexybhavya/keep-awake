@@ -74,11 +74,36 @@ def screen_rect():
 
 
 def seconds_since_any_input() -> float:
-    """How long since the user last touched mouse / keyboard / trackpad."""
+    """How long since the user last touched mouse / keyboard / trackpad across all input channels."""
     try:
-        return float(
-            CGEventSourceSecondsSinceLastEventType(kCGNullEventSource, kCGAnyInputEventType)
+        from Quartz import (
+            kCGEventKeyDown,
+            kCGEventKeyUp,
+            kCGEventFlagsChanged,
+            kCGEventLeftMouseDown,
+            kCGEventRightMouseDown,
+            kCGEventScrollWheel,
+            kCGEventMouseMoved,
         )
+        types = [
+            kCGAnyInputEventType,
+            kCGEventKeyDown,
+            kCGEventKeyUp,
+            kCGEventFlagsChanged,
+            kCGEventLeftMouseDown,
+            kCGEventRightMouseDown,
+            kCGEventScrollWheel,
+            kCGEventMouseMoved,
+        ]
+        min_sec = float("inf")
+        for t in types:
+            try:
+                s = float(CGEventSourceSecondsSinceLastEventType(kCGNullEventSource, t))
+                if s < min_sec:
+                    min_sec = s
+            except Exception:
+                pass
+        return min_sec
     except Exception:
         return float("inf")
 
@@ -119,6 +144,20 @@ def post_click(x: float, y: float) -> None:
         raise RuntimeError("CGEventCreateMouseEvent returned NULL")
     CGEventPost(kCGHIDEventTap, down)
     CGEventPost(kCGHIDEventTap, up)
+
+
+def post_key(virtual_key: int = 113) -> None:
+    """Inject a harmless non-character key press+release (default F15 = 113) for keyboard telemetry."""
+    try:
+        from Quartz import CGEventCreateKeyboardEvent
+
+        down = CGEventCreateKeyboardEvent(kCGNullEventSource, virtual_key, True)
+        up = CGEventCreateKeyboardEvent(kCGNullEventSource, virtual_key, False)
+        if down is not None and up is not None:
+            CGEventPost(kCGHIDEventTap, down)
+            CGEventPost(kCGHIDEventTap, up)
+    except Exception:
+        pass
 
 
 def warp(x: float, y: float) -> None:
@@ -240,16 +279,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--interval",
         type=float,
-        default=30.0,
-        help="seconds between nudges (most AFK timers use 30-60s)",
+        default=15.0,
+        help="seconds between nudges (15s recommended to bypass 30s AFK detectors)",
     )
     p.add_argument(
         "--mode",
-        choices=["slide", "wiggle", "jitter", "circle", "roam", "warp", "scroll"],
-        default="slide",
-        help="slide=smooth visible glide (default), wiggle=visible shake, "
-        "jitter=invisible 1px hop, circle=tiny orbit, roam=drift around screen, "
-        "warp=silent reposition (no event), scroll=turn the mouse wheel down every interval",
+        choices=["bypass", "slide", "wiggle", "jitter", "circle", "roam", "warp", "scroll"],
+        default="bypass",
+        help="bypass=slide + micro-scroll + harmless key (default, defeats Kuro & screen monitors), "
+        "slide=smooth visible glide, wiggle=visible shake, jitter=invisible 1px hop, "
+        "circle=tiny orbit, roam=drift around screen, warp=silent reposition (no event), "
+        "scroll=turn the mouse wheel down every interval",
     )
     p.add_argument(
         "--distance",
@@ -329,17 +369,24 @@ def main() -> int:
         if args.mode == "scroll":
             post_scroll(args.scroll_lines)
             return f"wheel {args.scroll_lines:+d} lines"
-        if args.mode in ("slide", "wiggle"):
+        if args.mode in ("bypass", "slide", "wiggle"):
             start_x, start_y = current_position()
-            dist = max(args.distance, 35.0 if args.mode == "slide" else 20.0)
-            steps = 24 if args.mode == "slide" else 16
-            cycles = 1.0 if args.mode == "slide" else 2.0
+            dist = max(args.distance, 35.0 if args.mode in ("bypass", "slide") else 20.0)
+            steps = 24 if args.mode in ("bypass", "slide") else 16
+            cycles = 1.0 if args.mode in ("bypass", "slide") else 2.0
             for i in range(steps + 1):
                 prog = i / steps
                 offset = math.sin(prog * 2.0 * math.pi * cycles) * dist
                 nx, ny = clamp_to_screen(start_x + offset, start_y, rect)
                 post_move(nx, ny)
                 time.sleep(0.015)
+            if args.mode == "bypass":
+                # Micro-scroll down 1 and up 1 for desktop visual frame activity
+                post_scroll(1)
+                time.sleep(0.02)
+                post_scroll(-1)
+                # Virtual F15 key down & up for keyboard activity telemetry
+                post_key(113)
             return f"{args.mode} ({start_x:.1f},{start_y:.1f})"
         x, y = nudger.next_point(rect)
         if args.mode == "warp":
