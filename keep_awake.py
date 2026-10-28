@@ -284,12 +284,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--mode",
-        choices=["bypass", "slide", "wiggle", "jitter", "circle", "roam", "warp", "scroll"],
-        default="bypass",
-        help="bypass=slide + micro-scroll + harmless key (default, defeats Kuro & screen monitors), "
-        "slide=smooth visible glide, wiggle=visible shake, jitter=invisible 1px hop, "
+        choices=["slide", "wiggle", "jitter", "circle", "roam", "warp", "scroll", "bypass"],
+        default="slide",
+        help="slide=smooth visible glide, wiggle=visible shake, jitter=invisible 1px hop, "
         "circle=tiny orbit, roam=drift around screen, warp=silent reposition (no event), "
-        "scroll=turn the mouse wheel down every interval",
+        "scroll=turn the mouse wheel down every interval. (All modes include universal anti-AFK telemetry)",
     )
     p.add_argument(
         "--distance",
@@ -352,6 +351,8 @@ def main() -> int:
 
     interval = max(1.0, args.interval)
     run_for = parse_duration(args.stop_after)
+    if args.mode == "bypass":
+        args.mode = "slide"
     nudger = Nudger(args.mode, args.distance)
     rect = screen_rect()
 
@@ -368,31 +369,38 @@ def main() -> int:
         rect = screen_rect()  # display arrangement can change
         if args.mode == "scroll":
             post_scroll(args.scroll_lines)
+            post_key(113)
             return f"wheel {args.scroll_lines:+d} lines"
-        if args.mode in ("bypass", "slide", "wiggle"):
+        if args.mode in ("slide", "wiggle"):
             start_x, start_y = current_position()
-            dist = max(args.distance, 35.0 if args.mode in ("bypass", "slide") else 20.0)
-            steps = 24 if args.mode in ("bypass", "slide") else 16
-            cycles = 1.0 if args.mode in ("bypass", "slide") else 2.0
+            dist = max(args.distance, 35.0 if args.mode == "slide" else 20.0)
+            steps = 24 if args.mode == "slide" else 16
+            cycles = 1.0 if args.mode == "slide" else 2.0
             for i in range(steps + 1):
                 prog = i / steps
                 offset = math.sin(prog * 2.0 * math.pi * cycles) * dist
                 nx, ny = clamp_to_screen(start_x + offset, start_y, rect)
                 post_move(nx, ny)
                 time.sleep(0.015)
-            if args.mode == "bypass":
-                # Micro-scroll down 1 and up 1 for desktop visual frame activity
-                post_scroll(1)
-                time.sleep(0.02)
-                post_scroll(-1)
-                # Virtual F15 key down & up for keyboard activity telemetry
-                post_key(113)
+            # Universal anti-AFK: ScreenCaptureKit micro-scroll & keystroke
+            post_scroll(1)
+            time.sleep(0.01)
+            post_scroll(-1)
+            post_key(113)
             return f"{args.mode} ({start_x:.1f},{start_y:.1f})"
         x, y = nudger.next_point(rect)
         if args.mode == "warp":
             warp(x, y)
+            post_scroll(1)
+            time.sleep(0.01)
+            post_scroll(-1)
+            post_key(113)
             return "warped"
         post_move(x, y)
+        post_scroll(1)
+        time.sleep(0.01)
+        post_scroll(-1)
+        post_key(113)
         return f"{x:.1f},{y:.1f}"
 
     if args.once:

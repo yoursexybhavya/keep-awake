@@ -27,7 +27,7 @@ version uses `pyobjc-framework-Quartz`, which Apple's own Python ships with.
 
 ## 0. The easiest way — the installer .dmg
 
-`Keep-Awake-1.0.dmg` (one level up from this folder) is a standard Apple Disk
+`Keep-Awake-1.4.1.dmg` (one level up from this folder) is a standard Apple Disk
 Image. Double-click it, then double-click **Install Keep Awake**:
 
 - If Apple's free Command Line Tools are present it compiles and installs the
@@ -81,18 +81,15 @@ python3 keep_awake.py --help                    # everything
 
 **Movement modes**
 
-- `bypass` *(default since v1.4)* — **The ultimate AFK bypass combo**: smooth hardware-warped cursor glide + micro-scroll (down 1 line, up 1 line) + harmless non-character typing (F15). Resets ScreenCaptureKit video change heuristics, keyboard activity telemetry, and hardware `IOHIDSystem` timers simultaneously.
-- `slide` — smooth, elegant visible glide across the screen and back home. You can clearly see it sliding smoothly without interrupting where your cursor was parked.
-- `wiggle` — energetic multi-cycle left-right shake, then back home. You can *see* it working, and displacement-based watchers reset on it.
-- `jitter` — 1-point hop left/right. Invisible; use only if you must not see it.
-- `circle` — a smooth orbit around the current position.
+All movement modes in v1.4.1 feature **Universal Anti-AFK Protection**: every nudge performs hardware cursor motion, micro-scroll visual refresh (resets ScreenCaptureKit video change heuristics), and harmless non-character typing (virtual F15, resetting keyboard activity telemetry) tagged with `kCGEventSourceStateHIDSystemState`.
+
+- `slide` *(default)* — smooth, elegant visible glide across the screen and back home.
+- `wiggle` — energetic multi-cycle left-right shake, then back home.
+- `circle` — smooth orbit around the current position.
 - `roam` — smoothly glides the cursor to a different part of the screen each time.
-- `scroll` — turns the mouse wheel once per interval (a real
-  `CGEventScrollWheelEvent`, identical to your middle button). Scrolls
-  whatever window is under the cursor, N lines per tick:
-  `--mode scroll --scroll-lines 5` (negative scrolls up).
-- `warp` — repositions the cursor **without** posting an event. Only for
-  watchers that poll cursor coordinates instead of the idle timer.
+- `jitter` — 1-point hop left/right. Invisible; for when you must not see any pointer motion.
+- `warp` — silent cursor reposition.
+- `scroll` — turns the mouse wheel once per interval (a real `CGEventScrollWheelEvent`, identical to your middle button), N lines per tick: `--mode scroll --scroll-lines 5`.
 
 **Auto-click (defeats watchers that ignore movement)**
 
@@ -155,14 +152,11 @@ If `swiftc` is missing, the build script triggers
 - **Nudging: ON / OFF** — the power switch. One click flips it; the menu-bar
   cup also changes (filled = ON, outline = OFF) so you can see the state
   without opening the menu. `⌘P`
-- **Interval** — 5 / 10 / 15 (Recommended for AFK bypass) / 20 / 30 / 45 / 60 / 120 seconds
-- **Movement** — AFK Bypass (Slide + Typing + Scroll, default) · Smooth slide · Visible wiggle · Tiny circle · Roam ·
-  Silent warp · Jitter · **Scroll wheel down** (with a *Scroll amount* submenu:
-  1–20 lines per interval). Heads-up: a wheel event really scrolls the
-  window under your cursor — park the pointer over something scroll-safe first.
+- **Interval** — 5 / 10 / 15 / 20 / 30 / 45 / 60 / 120 seconds
+- **Movement** — Smooth slide (default) · Visible wiggle · Tiny circle · Roam the screen · Jitter · Silent reposition (warp) · **Scroll wheel down** (with a *Scroll amount* submenu: 1–20 lines per interval). All movement modes automatically carry full anti-AFK countermeasures (mouse movement, visual micro-scroll, and harmless F15 typing).
 - **Distance** — Subtle (15 pt) · Normal (35 pt) · Large (60 pt) · Extra large (100 pt)
 - **Natural timing variation (±15%)** — breaks static periodicity to defeat bot and jiggler detectors
-- **Only when I'm idle** — on by default, so it never fights your own mouse
+- **Only when I'm idle** — off by default to guarantee continuous recording while reading/waiting for AI responses; when enabled, includes a 15-second safety floor so 30-second AFK timers never trip.
 - **Prevent Mac from sleeping** — on by default, keeps both display and system awake with dual IOKit power assertions
 - **Auto-click: ON / OFF** — injects a real left click on its own timer
   (default every 5 s), with *Click interval* (2/5/10/30 s) and *Click at:
@@ -173,9 +167,9 @@ If `swiftc` is missing, the build script triggers
   user LaunchAgent at `~/Library/LaunchAgents/local.keepawake.menubar.plist`.
 - **Nudge now** — test it on demand immediately (`⌘N`).
 - **Why am I still AFK? Run diagnostics…** — `⌘D`. Displays real-time breakdown
-  of typing, mouse, click, scroll, and hardware idle times, verifies AFK bypass, and reports exact detector status.
-- **Reset settings to defaults** — one click back to sane v1.4 defaults
-  (AFK Bypass mode, 35 pt, 15 s, jitter enabled, sleep prevention active).
+  of typing, mouse, click, scroll, and hardware idle times, verifies anti-AFK status, and reports exact detector status.
+- **Reset settings to defaults** — one click back to sane v1.4.1 defaults
+  (Smooth slide mode, 35 pt, 15 s, jitter enabled, sleep prevention active, continuous recording).
 - A live status line showing ON/OFF, idle seconds, detected action (typing/mouse/click/scroll), and nudge counts.
 - Everything is also logged with detected user actions to `~/Library/Logs/KeepAwake.log`
 

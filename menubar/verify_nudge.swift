@@ -1,5 +1,5 @@
 //
-// verify_nudge.swift — self-contained verification check for Keep Awake v1.4 AFK bypass engine.
+// verify_nudge.swift — self-contained verification check for Keep Awake v1.4.1 universal anti-AFK engine.
 // Run with: swift menubar/verify_nudge.swift
 //
 
@@ -90,4 +90,4 @@ assert(drift < 2.0, "Cursor drift after slide exceeded tolerance")
 print("    Max displacement: \(maxDisplacement)pt | Return drift: \(drift)pt")
 print("    AFK Bypass composite execution: PASS")
 
-print("==> ALL v1.4 VERIFICATION CHECKS PASSED.")
+print("==> ALL v1.4.1 VERIFICATION CHECKS PASSED.")

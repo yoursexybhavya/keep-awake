@@ -36,8 +36,8 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key>       <string>$APP_NAME</string>
   <key>CFBundleExecutable</key>        <string>KeepAwake</string>
   <key>CFBundleIdentifier</key>        <string>local.keepawake.menubar</string>
-  <key>CFBundleShortVersionString</key><string>1.4</string>
-  <key>CFBundleVersion</key>           <string>1.4</string>
+  <key>CFBundleShortVersionString</key><string>1.4.1</string>
+  <key>CFBundleVersion</key>           <string>1.4.1</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>
   <key>LSMinimumSystemVersion</key>    <string>11.0</string>
   <key>LSUIElement</key>               <true/>

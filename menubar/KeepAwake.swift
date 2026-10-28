@@ -9,10 +9,10 @@
 //  so presence & AFK detectors (Teams, Slack, Zoom, Kuro, Hubstaff, etc.)
 //  never mark you Away.
 //
-//  v1.4: Multi-input user action detection (typing, mouse, clicks, scrolling),
-//        composite AFK Bypass mode (slide + synthetic keystroke + micro-scroll),
-//        human timing variance (±15% jitter), hardware HID state tagging,
-//        dual display & system sleep prevention assertions.
+//  v1.4.1: Universal anti-AFK across ALL modes (hardware mouse motion,
+//          ScreenCaptureKit visual refresh micro-scroll, harmless typing F15),
+//          multi-input user action detection (typing, mouse, clicks, scrolling),
+//          clean menu options, 15s max anti-AFK safety floor.
 //
 
 import Cocoa
@@ -55,7 +55,6 @@ final class Settings {
     static let shared = Settings()
 
     enum Mode: String, CaseIterable {
-        case bypass = "AFK Bypass (Slide + Typing + Scroll)"
         case slide  = "Smooth slide (visible)"
         case wiggle = "Visible wiggle"
         case circle = "Tiny circle"
@@ -67,14 +66,14 @@ final class Settings {
 
     @objc dynamic var enabled: Bool = true { didSet { applySleepAssertion(); save() } }
     @objc dynamic var interval: Double = 15 { didSet { save() } }
-    @objc dynamic var onlyWhenIdle: Bool = true { didSet { save() } }
+    @objc dynamic var onlyWhenIdle: Bool = false { didSet { save() } }
     @objc dynamic var idleThreshold: Double = 5 { didSet { save() } }
     @objc dynamic var distance: Double = 35 { didSet { save() } }
     @objc dynamic var scrollLines: Int = 3 { didSet { save() } }
     @objc dynamic var humanJitter: Bool = true { didSet { save() } }
     @objc dynamic var launchAtLogin: Bool = false { didSet { applyLaunchAtLogin(); save() } }
     @objc dynamic var preventSleep: Bool = true { didSet { applySleepAssertion(); save() } }
-    @objc dynamic var modeRaw: String = Mode.bypass.rawValue { didSet { save() } }
+    @objc dynamic var modeRaw: String = Mode.slide.rawValue { didSet { save() } }
 
     // Auto-click channel
     @objc dynamic var autoClick: Bool = false { didSet { save() } }
@@ -86,7 +85,6 @@ final class Settings {
 
     var mode: Mode {
         if let m = Mode(rawValue: modeRaw) { return m }
-        if modeRaw.contains("Bypass") || modeRaw.contains("bypass") { return .bypass }
         if modeRaw.contains("slide") { return .slide }
         if modeRaw.contains("wiggle") { return .wiggle }
         if modeRaw.contains("circle") { return .circle }
@@ -94,7 +92,7 @@ final class Settings {
         if modeRaw.contains("jitter") { return .jitter }
         if modeRaw.contains("warp") { return .warp }
         if modeRaw.contains("scroll") { return .scroll }
-        return .bypass
+        return .slide
     }
 
     private let defaults = UserDefaults.standard
@@ -120,7 +118,11 @@ final class Settings {
         if defaults.object(forKey: "launchAtLogin") != nil { launchAtLogin = defaults.bool(forKey: "launchAtLogin") }
         if defaults.object(forKey: "preventSleep") != nil { preventSleep = defaults.bool(forKey: "preventSleep") }
         if let raw = defaults.string(forKey: "mode") {
-            modeRaw = raw
+            if raw.contains("Bypass") || raw.contains("bypass") {
+                modeRaw = Mode.slide.rawValue
+            } else if Mode(rawValue: raw) != nil {
+                modeRaw = raw
+            }
         }
         if defaults.object(forKey: "autoClick") != nil { autoClick = defaults.bool(forKey: "autoClick") }
         if defaults.object(forKey: "clickInterval") != nil { clickInterval = defaults.double(forKey: "clickInterval") }
@@ -156,9 +158,9 @@ final class Settings {
                   "clickInterval", "clickAtSavedPoint", "hasClickPoint", "clickPointX", "clickPointY"] {
             defaults.removeObject(forKey: k)
         }
-        enabled = true; interval = 15; onlyWhenIdle = true; idleThreshold = 5
+        enabled = true; interval = 15; onlyWhenIdle = false; idleThreshold = 5
         distance = 35; scrollLines = 3; humanJitter = true
-        modeRaw = Mode.bypass.rawValue
+        modeRaw = Mode.slide.rawValue
         preventSleep = true
         autoClick = false; clickInterval = 5; clickAtSavedPoint = false
         hasClickPoint = false; clickPointX = 0; clickPointY = 0
@@ -329,7 +331,7 @@ final class CursorNudger {
             desc = "scroll (\(String(format: "%.1f", scroll))s ago)"
             kind = "scroll"
         } else {
-            desc = "hardware input (\(String(format: "%.1f", hw))s ago)"
+            desc = "system input (\(String(format: "%.1f", hw))s ago)"
             kind = "system"
         }
 
@@ -356,9 +358,8 @@ final class CursorNudger {
         }
     }
 
-    /// Injects a safe non-character virtual key (F15) to register genuine keyboard activity.
+    /// Injects a safe non-character virtual key (F15) to register genuine keyboard activity for telemetry.
     private func postHarmlessKeystroke() {
-        // Virtual key 113 = F15. Does not type any character, but updates keyboard event telemetry.
         if let kdown = CGEvent(keyboardEventSource: hidSource, virtualKey: 113, keyDown: true),
            let kup = CGEvent(keyboardEventSource: hidSource, virtualKey: 113, keyDown: false) {
             kdown.post(tap: .cghidEventTap)
@@ -464,7 +465,7 @@ final class CursorNudger {
 
         let activeMode: Settings.Mode
         if forceVisible {
-            activeMode = (s.mode == .scroll || s.mode == .jitter || s.mode == .warp) ? .bypass : s.mode
+            activeMode = (s.mode == .scroll || s.mode == .jitter || s.mode == .warp) ? .slide : s.mode
         } else {
             activeMode = s.mode
         }
@@ -475,7 +476,7 @@ final class CursorNudger {
 
         let effectiveDistance: CGFloat
         switch activeMode {
-        case .bypass, .slide:
+        case .slide:
             effectiveDistance = max(baseDist, 35)
         case .wiggle:
             effectiveDistance = max(baseDist, 20)
@@ -487,18 +488,24 @@ final class CursorNudger {
             effectiveDistance = baseDist
         }
 
+        // All modes now include the full anti-AFK telemetry (keystroke + micro-scroll)
         if activeMode == .scroll {
             performScroll(lines: s.scrollLines)
+            postHarmlessKeystroke()
             return
         }
 
         if activeMode == .warp {
             performWarp(from: here, distance: effectiveDistance, step: currentStep, bounds: bounds)
+            postMicroScroll()
+            postHarmlessKeystroke()
             return
         }
 
         if activeMode == .jitter {
             performJitter(from: here, distance: effectiveDistance, step: currentStep, bounds: bounds)
+            postMicroScroll()
+            postHarmlessKeystroke()
             return
         }
 
@@ -509,30 +516,21 @@ final class CursorNudger {
             defer { self.isAnimating = false }
 
             switch activeMode {
-            case .bypass:
-                // Complete AFK Bypass Sequence:
-                // 1. Smooth hardware cursor slide
-                self.performSlide(from: here, distance: effectiveDistance, bounds: bounds)
-                // 2. Micro-scroll down & up for ScreenCaptureKit desktop visual activity
-                self.postMicroScroll()
-                // 3. Simulated non-character typing (F15) for keyboard activity telemetry
-                self.postHarmlessKeystroke()
-
             case .slide:
                 self.performSlide(from: here, distance: effectiveDistance, bounds: bounds)
-
             case .wiggle:
                 self.performWiggle(from: here, distance: effectiveDistance, bounds: bounds)
-
             case .circle:
                 self.performCircle(from: here, radius: effectiveDistance, bounds: bounds)
-
             case .roam:
                 self.performRoam(from: here, step: currentStep, bounds: bounds)
-
             default:
-                break
+                self.performSlide(from: here, distance: effectiveDistance, bounds: bounds)
             }
+
+            // Universal anti-AFK: In ALL motion modes, perform micro-scroll & keystroke
+            self.postMicroScroll()
+            self.postHarmlessKeystroke()
         }
     }
 
@@ -576,7 +574,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Settings.shared.applySleepAssertion()
         if Settings.shared.launchAtLogin { Settings.shared.applyLaunchAtLogin() }
 
-        Log.write("launched v1.4 — mode=\(Settings.shared.modeRaw) interval=\(Settings.shared.interval)s jitter=\(Settings.shared.humanJitter) distance=\(Settings.shared.distance)pt preventSleep=\(Settings.shared.preventSleep)")
+        Log.write("launched v1.4.1 — mode=\(Settings.shared.modeRaw) interval=\(Settings.shared.interval)s onlyWhenIdle=\(Settings.shared.onlyWhenIdle) jitter=\(Settings.shared.humanJitter) distance=\(Settings.shared.distance)pt preventSleep=\(Settings.shared.preventSleep)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -599,7 +597,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             button.title = on ? "☕️" : "💤"
         }
-        button.toolTip = on ? "Keep Awake — ON (AFK Bypass Active)"
+        button.toolTip = on ? "Keep Awake — ON (Anti-AFK active across all modes)"
                             : "Keep Awake — OFF (cursor untouched)"
     }
 
@@ -626,7 +624,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let intervalItem = NSMenuItem(title: "Interval", action: nil, keyEquivalent: "")
         let intervalMenu = NSMenu()
         for secs: Double in [5, 10, 15, 20, 30, 45, 60, 120] {
-            let title = secs == 15 ? "15 seconds (Recommended for AFK)" : "\(Int(secs)) seconds"
+            let title = "\(Int(secs)) seconds"
             let mi = NSMenuItem(title: title, action: #selector(pickInterval(_:)), keyEquivalent: "")
             mi.target = self
             mi.representedObject = secs
@@ -688,7 +686,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         jitterItem.state = s.humanJitter ? .on : .off
         menu.addItem(jitterItem)
 
-        // Only when idle
+        // Only when idle (Default OFF: guarantees uninterrupted recording while working with AI)
         let idleItem = NSMenuItem(title: "Only when I'm idle",
                                   action: #selector(toggleIdleOnly), keyEquivalent: "")
         idleItem.target = self
@@ -815,7 +813,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard s.enabled else { return }
         if s.onlyWhenIdle {
             let act = CursorNudger.shared.currentActivity()
-            guard act.idleSeconds >= s.idleThreshold else {
+            let timeSinceLastNudge = lastNudgeAt.map { Date().timeIntervalSince($0) } ?? 999.0
+            // If user is active AND a nudge occurred recently, wait;
+            // BUT if >= 15 seconds have elapsed without a nudge, ALWAYS nudge so 30s AFK detectors (like Kuro) never trigger!
+            if act.idleSeconds < s.idleThreshold && timeSinceLastNudge < 15.0 {
                 skipCount += 1
                 Log.write("skipped: user active (\(act.lastActionDescription) < threshold \(Int(s.idleThreshold))s)")
                 scheduleNextTick()
@@ -973,18 +974,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             m += "Before Test Nudge: \(beforeAct.lastActionDescription)\n"
             m += "Current Detected Action: \(afterAct.lastActionDescription)\n"
             m += "Overall Idle Time: \(String(format: "%.1f", afterAct.idleSeconds))s (Threshold: \(Int(s.idleThreshold))s)\n\n"
-            m += "AFK Bypass Configuration:\n"
-            m += "  • Active Mode: \(s.mode.rawValue)\n"
+            m += "Configuration:\n"
+            m += "  • Active Mode: \(s.mode.rawValue) (with full anti-AFK protection)\n"
             m += "  • Interval: \(Int(s.interval))s (Jitter: \(s.humanJitter ? "Enabled ±15%" : "Disabled"))\n"
             m += "  • Sleep Assertion: \(s.preventSleep ? "ACTIVE (Display & System)" : "Disabled")\n"
             m += "  • Total Nudges: \(self.nudgeCount) | Skipped: \(self.skipCount)\n\n"
             if afterAct.idleSeconds < 1.5 || afterAct.hardwareIdle < 1.0 {
-                m += "✅ AFK Bypass Verified: Hardware & system idle timers successfully reset on injected activity.\n"
+                m += "✅ AFK Protection Active: Hardware & system idle timers successfully reset on every nudge across all modes.\n"
             } else {
-                m += "⚠️ Watcher Notice: Check Accessibility permissions if idle counter did not reset.\n"
+                m += "⚠️ Notice: Check Accessibility permissions if idle counter did not reset.\n"
             }
             let a = NSAlert()
-            a.messageText = "Keep Awake — AFK Bypass Diagnostics"
+            a.messageText = "Keep Awake Diagnostics"
             a.informativeText = m
             a.alertStyle = .informational
             a.runModal()
