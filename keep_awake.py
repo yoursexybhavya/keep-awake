@@ -123,12 +123,21 @@ def post_move(x: float, y: float) -> None:
 def post_scroll(lines: int) -> None:
     """Inject a real scroll-wheel event — identical to turning the middle
     button's wheel by `lines` notches. Positive = down, negative = up."""
-    event = CGEventCreateScrollWheelEvent(
-        kCGNullEventSource, kCGScrollEventUnitLine, 1, lines
-    )
-    if event is None:
-        raise RuntimeError("CGEventCreateScrollWheelEvent returned NULL")
-    CGEventPost(kCGHIDEventTap, event)
+    count = max(1, abs(lines))
+    direction = -1 if lines >= 0 else 1
+    for _ in range(count):
+        event = CGEventCreateScrollWheelEvent(
+            kCGNullEventSource, kCGScrollEventUnitLine, 1, direction
+        )
+        if event is None:
+            raise RuntimeError("CGEventCreateScrollWheelEvent returned NULL")
+        try:
+            from Quartz import CGEventSetIntegerValueField
+            CGEventSetIntegerValueField(event, 99, -25 if direction < 0 else 25)
+        except Exception:
+            pass
+        CGEventPost(kCGHIDEventTap, event)
+        time.sleep(0.018)
 
 
 def post_click(x: float, y: float) -> None:
@@ -371,10 +380,11 @@ def main() -> int:
             post_scroll(args.scroll_lines)
             post_key(113)
             return f"wheel {args.scroll_lines:+d} lines"
+
         if args.mode in ("slide", "wiggle"):
             start_x, start_y = current_position()
-            dist = max(args.distance, 35.0 if args.mode == "slide" else 20.0)
-            steps = 24 if args.mode == "slide" else 16
+            dist = args.distance
+            steps = 30 if args.mode == "slide" else 32
             cycles = 1.0 if args.mode == "slide" else 2.0
             for i in range(steps + 1):
                 prog = i / steps
@@ -382,24 +392,59 @@ def main() -> int:
                 nx, ny = clamp_to_screen(start_x + offset, start_y, rect)
                 post_move(nx, ny)
                 time.sleep(0.015)
-            # Universal anti-AFK: ScreenCaptureKit micro-scroll & keystroke
-            post_scroll(1)
-            time.sleep(0.01)
-            post_scroll(-1)
             post_key(113)
             return f"{args.mode} ({start_x:.1f},{start_y:.1f})"
-        x, y = nudger.next_point(rect)
+
+        if args.mode == "circle":
+            start_x, start_y = current_position()
+            radius = args.distance
+            go_down = (start_y - 2 * radius < rect.origin.y + 12)
+            cy = (start_y + radius) if go_down else (start_y - radius)
+            sign = -1.0 if go_down else 1.0
+            steps = 32
+            for i in range(steps + 1):
+                angle = (i / steps) * 2.0 * math.pi
+                nx, ny = clamp_to_screen(start_x + radius * math.sin(angle),
+                                         cy + sign * radius * math.cos(angle), rect)
+                post_move(nx, ny)
+                time.sleep(0.016)
+            post_key(113)
+            return f"circle ({start_x:.1f},{start_y:.1f})"
+
+        if args.mode == "jitter":
+            start_x, start_y = current_position()
+            dx = 1.0 if start_x + 1 < rect.origin.x + rect.size.width - 12 else -1.0
+            post_move(start_x + dx, start_y)
+            time.sleep(0.025)
+            post_move(start_x, start_y)
+            post_key(113)
+            return f"jitter ({start_x:.1f},{start_y:.1f})"
+
         if args.mode == "warp":
-            warp(x, y)
-            post_scroll(1)
-            time.sleep(0.01)
-            post_scroll(-1)
+            start_x, start_y = current_position()
+            dx = args.distance if start_x + args.distance < rect.origin.x + rect.size.width - 12 else -args.distance
+            warp(start_x + dx, start_y)
+            time.sleep(0.035)
+            warp(start_x, start_y)
             post_key(113)
             return "warped"
+
+        if args.mode == "roam":
+            start_x, start_y = current_position()
+            x, y = nudger.next_point(rect)
+            steps = 32
+            for i in range(1, steps + 1):
+                t = i / steps
+                ease = t * t * (3 - 2 * t)
+                nx = start_x + (x - start_x) * ease
+                ny = start_y + (y - start_y) * ease
+                post_move(nx, ny)
+                time.sleep(0.016)
+            post_key(113)
+            return f"roam to ({x:.1f},{y:.1f})"
+
+        x, y = nudger.next_point(rect)
         post_move(x, y)
-        post_scroll(1)
-        time.sleep(0.01)
-        post_scroll(-1)
         post_key(113)
         return f"{x:.1f},{y:.1f}"
 

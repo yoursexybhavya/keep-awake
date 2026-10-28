@@ -377,8 +377,8 @@ final class CursorNudger {
     }
 
     private func performSlide(from start: CGPoint, distance: CGFloat, bounds: CGRect) {
-        let steps = 24
-        let delayUs: useconds_t = 16000
+        let steps = 30
+        let delayUs: useconds_t = 15000
         for i in 0...steps {
             let progress = Double(i) / Double(steps)
             let offset = CGFloat(sin(progress * 2.0 * .pi) * Double(distance))
@@ -390,8 +390,8 @@ final class CursorNudger {
     }
 
     private func performWiggle(from start: CGPoint, distance: CGFloat, bounds: CGRect) {
-        let steps = 16
-        let delayUs: useconds_t = 14000
+        let steps = 32
+        let delayUs: useconds_t = 15000
         for i in 0...steps {
             let progress = Double(i) / Double(steps)
             let offset = CGFloat(sin(progress * 4.0 * .pi) * Double(distance))
@@ -403,13 +403,15 @@ final class CursorNudger {
     }
 
     private func performCircle(from start: CGPoint, radius: CGFloat, bounds: CGRect) {
-        let steps = 24
+        let steps = 32
         let delayUs: useconds_t = 16000
+        let goDown = (start.y - 2 * radius < bounds.minY + 8)
+        let cy = goDown ? (start.y + radius) : (start.y - radius)
+        let sign: CGFloat = goDown ? -1.0 : 1.0
         for i in 0...steps {
-            let progress = Double(i) / Double(steps)
-            let angle = progress * 2.0 * .pi
+            let angle = (Double(i) / Double(steps)) * 2.0 * .pi
             let x = min(max(start.x + radius * CGFloat(sin(angle)), bounds.minX + 8), bounds.maxX - 8)
-            let y = min(max(start.y - radius * CGFloat(1 - cos(angle)), bounds.minY + 8), bounds.maxY - 8)
+            let y = min(max(cy + sign * radius * CGFloat(cos(angle)), bounds.minY + 8), bounds.maxY - 8)
             let p = CGPoint(x: x, y: y)
             postCursor(at: p)
             usleep(delayUs)
@@ -423,7 +425,7 @@ final class CursorNudger {
         let fy = 0.25 + 0.5 * (sb - floor(sb))
         let target = CGPoint(x: bounds.minX + bounds.width * fx,
                              y: bounds.minY + bounds.height * fy)
-        let steps = 24
+        let steps = 32
         let delayUs: useconds_t = 16000
         for i in 1...steps {
             let t = Double(i) / Double(steps)
@@ -435,59 +437,50 @@ final class CursorNudger {
         }
     }
 
-    private func performJitter(from start: CGPoint, distance: CGFloat, step: Int, bounds: CGRect) {
-        let dx = (step % 2 == 0) ? distance : -distance
-        let p = CGPoint(x: min(max(start.x + dx, bounds.minX + 8), bounds.maxX - 8), y: start.y)
-        postCursor(at: p)
+    private func performJitter(from start: CGPoint, bounds: CGRect) {
+        let dx: CGFloat = (start.x + 1 < bounds.maxX - 8) ? 1.0 : -1.0
+        postCursor(at: CGPoint(x: start.x + dx, y: start.y))
+        usleep(25000)
+        postCursor(at: start)
     }
 
-    private func performWarp(from start: CGPoint, distance: CGFloat, step: Int, bounds: CGRect) {
-        let dx = (step % 2 == 0) ? distance : -distance
-        let p = CGPoint(x: min(max(start.x + dx, bounds.minX + 8), bounds.maxX - 8), y: start.y)
-        postCursor(at: p)
+    private func performWarp(from start: CGPoint, distance: CGFloat, bounds: CGRect) {
+        let dx: CGFloat = (start.x + distance < bounds.maxX - 8) ? distance : -distance
+        CGWarpMouseCursorPosition(CGPoint(x: start.x + dx, y: start.y))
+        usleep(35000)
+        CGWarpMouseCursorPosition(start)
     }
 
     private func performScroll(lines: Int) {
-        if let ev = CGEvent(scrollWheelEvent2Source: nil, units: .line,
-                            wheelCount: 1, wheel1: Int32(lines),
-                            wheel2: 0, wheel3: 0) {
-            ev.post(tap: .cghidEventTap)
+        let count = max(1, abs(lines))
+        for _ in 0..<count {
+            // In macOS CoreGraphics: negative wheel1 indicates scrolling down.
+            if let ev = CGEvent(scrollWheelEvent2Source: nil, units: .line,
+                                wheelCount: 1, wheel1: -1,
+                                wheel2: 0, wheel3: 0) {
+                // Also set continuous pixel delta for modern scroll views (browsers, Electron, Cocoa)
+                ev.setIntegerValueField(CGEventField(rawValue: 99)!, value: -25)
+                ev.post(tap: .cghidEventTap)
+            }
+            usleep(18000)
         }
     }
 
-    func nudge(forceVisible: Bool = false) {
+    func nudge() {
         let s = Settings.shared
         let bounds = CGDisplayBounds(CGMainDisplayID())
         let here = currentLocation()
         step += 1
         let currentStep = step
 
-        let activeMode: Settings.Mode
-        if forceVisible {
-            activeMode = (s.mode == .scroll || s.mode == .jitter || s.mode == .warp) ? .slide : s.mode
-        } else {
-            activeMode = s.mode
-        }
+        let activeMode = s.mode
 
         // Apply natural human distance variation
         let jitterFactor = s.humanJitter ? (0.85 + Double.random(in: 0...0.30)) : 1.0
         let baseDist = CGFloat(s.distance * jitterFactor)
 
-        let effectiveDistance: CGFloat
-        switch activeMode {
-        case .slide:
-            effectiveDistance = max(baseDist, 35)
-        case .wiggle:
-            effectiveDistance = max(baseDist, 20)
-        case .circle:
-            effectiveDistance = max(baseDist, 25)
-        case .jitter:
-            effectiveDistance = 1
-        default:
-            effectiveDistance = baseDist
-        }
+        let effectiveDistance: CGFloat = (activeMode == .jitter) ? 1.0 : baseDist
 
-        // All modes now include the full anti-AFK telemetry (keystroke + micro-scroll)
         if activeMode == .scroll {
             performScroll(lines: s.scrollLines)
             postHarmlessKeystroke()
@@ -495,15 +488,13 @@ final class CursorNudger {
         }
 
         if activeMode == .warp {
-            performWarp(from: here, distance: effectiveDistance, step: currentStep, bounds: bounds)
-            postMicroScroll()
+            performWarp(from: here, distance: effectiveDistance, bounds: bounds)
             postHarmlessKeystroke()
             return
         }
 
         if activeMode == .jitter {
-            performJitter(from: here, distance: effectiveDistance, step: currentStep, bounds: bounds)
-            postMicroScroll()
+            performJitter(from: here, bounds: bounds)
             postHarmlessKeystroke()
             return
         }
@@ -527,8 +518,6 @@ final class CursorNudger {
                 self.performSlide(from: here, distance: effectiveDistance, bounds: bounds)
             }
 
-            // Universal anti-AFK: In ALL motion modes, perform micro-scroll & keystroke
-            self.postMicroScroll()
             self.postHarmlessKeystroke()
         }
     }
@@ -951,7 +940,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func nudgeNow() {
-        CursorNudger.shared.nudge(forceVisible: true)
+        CursorNudger.shared.nudge()
         nudgeCount += 1
         lastNudgeAt = Date()
         Log.write("nudge now (#\(nudgeCount)) mode=\(Settings.shared.modeRaw)")
@@ -970,7 +959,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func runDiagnostics() {
         let n = CursorNudger.shared
         let beforeAct = n.currentActivity()
-        n.nudge(forceVisible: true)
+        n.nudge()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self = self else { return }
             let afterAct = n.currentActivity()
