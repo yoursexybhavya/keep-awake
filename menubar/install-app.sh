@@ -11,9 +11,10 @@ if [ ! -d "$BUNDLE" ]; then
 fi
 
 DEST="/Applications/$BUNDLE"
-echo "==> Stopping running instance..."
-pkill -x KeepAwake 2>/dev/null || true
-sleep 0.5
+echo "==> Stopping running instances..."
+pkill -9 -f "Keep Awake.app" 2>/dev/null || true
+pkill -9 -x KeepAwake 2>/dev/null || true
+sleep 1
 
 echo "==> Installing to $DEST"
 rm -rf "$DEST"

@@ -9,10 +9,9 @@
 //  so presence & AFK detectors (Teams, Slack, Zoom, Kuro, Hubstaff, etc.)
 //  never mark you Away.
 //
-//  v1.4.1: Universal anti-AFK across ALL modes (hardware mouse motion,
-//          ScreenCaptureKit visual refresh micro-scroll, harmless typing F15),
-//          multi-input user action detection (typing, mouse, clicks, scrolling),
-//          clean menu options, 15s max anti-AFK safety floor.
+//  v1.4.2: Strict "Only when I'm idle" honoring user activity (no forced nudges),
+//          clean neutral menu options across all modes and intervals,
+//          hardware-accurate CGEvent dispatch + warp order to defeat Kuro and OS idle timers.
 //
 
 import Cocoa
@@ -349,19 +348,19 @@ final class CursorNudger {
         return currentActivity().idleSeconds
     }
 
-    /// Posts cursor hardware warp + HID mouse moved event with hardware source state.
+    /// Posts genuine mouse moved event to WindowServer & event tap, then warps hardware position.
     private func postCursor(at p: CGPoint) {
-        CGWarpMouseCursorPosition(p)
-        if let ev = CGEvent(mouseEventSource: hidSource, mouseType: .mouseMoved,
+        if let ev = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
                             mouseCursorPosition: p, mouseButton: .left) {
             ev.post(tap: .cghidEventTap)
         }
+        CGWarpMouseCursorPosition(p)
     }
 
     /// Injects a safe non-character virtual key (F15) to register genuine keyboard activity for telemetry.
     private func postHarmlessKeystroke() {
-        if let kdown = CGEvent(keyboardEventSource: hidSource, virtualKey: 113, keyDown: true),
-           let kup = CGEvent(keyboardEventSource: hidSource, virtualKey: 113, keyDown: false) {
+        if let kdown = CGEvent(keyboardEventSource: nil, virtualKey: 113, keyDown: true),
+           let kup = CGEvent(keyboardEventSource: nil, virtualKey: 113, keyDown: false) {
             kdown.post(tap: .cghidEventTap)
             kup.post(tap: .cghidEventTap)
         }
@@ -369,8 +368,8 @@ final class CursorNudger {
 
     /// Performs a micro-scroll down and up (1 notch) so ScreenCaptureKit registers desktop visual change.
     private func postMicroScroll() {
-        if let down = CGEvent(scrollWheelEvent2Source: hidSource, units: .line, wheelCount: 1, wheel1: 1, wheel2: 0, wheel3: 0),
-           let up = CGEvent(scrollWheelEvent2Source: hidSource, units: .line, wheelCount: 1, wheel1: -1, wheel2: 0, wheel3: 0) {
+        if let down = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 1, wheel2: 0, wheel3: 0),
+           let up = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: -1, wheel2: 0, wheel3: 0) {
             down.post(tap: .cghidEventTap)
             usleep(25000)
             up.post(tap: .cghidEventTap)
@@ -445,11 +444,11 @@ final class CursorNudger {
     private func performWarp(from start: CGPoint, distance: CGFloat, step: Int, bounds: CGRect) {
         let dx = (step % 2 == 0) ? distance : -distance
         let p = CGPoint(x: min(max(start.x + dx, bounds.minX + 8), bounds.maxX - 8), y: start.y)
-        CGWarpMouseCursorPosition(p)
+        postCursor(at: p)
     }
 
     private func performScroll(lines: Int) {
-        if let ev = CGEvent(scrollWheelEvent2Source: hidSource, units: .line,
+        if let ev = CGEvent(scrollWheelEvent2Source: nil, units: .line,
                             wheelCount: 1, wheel1: Int32(lines),
                             wheel2: 0, wheel3: 0) {
             ev.post(tap: .cghidEventTap)
@@ -535,9 +534,9 @@ final class CursorNudger {
     }
 
     func click(at p: CGPoint) {
-        guard let down = CGEvent(mouseEventSource: hidSource, mouseType: .leftMouseDown,
+        guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
                                  mouseCursorPosition: p, mouseButton: .left),
-              let up = CGEvent(mouseEventSource: hidSource, mouseType: .leftMouseUp,
+              let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
                                mouseCursorPosition: p, mouseButton: .left) else { return }
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
@@ -574,7 +573,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Settings.shared.applySleepAssertion()
         if Settings.shared.launchAtLogin { Settings.shared.applyLaunchAtLogin() }
 
-        Log.write("launched v1.4.1 — mode=\(Settings.shared.modeRaw) interval=\(Settings.shared.interval)s onlyWhenIdle=\(Settings.shared.onlyWhenIdle) jitter=\(Settings.shared.humanJitter) distance=\(Settings.shared.distance)pt preventSleep=\(Settings.shared.preventSleep)")
+        Log.write("launched v1.4.2 — mode=\(Settings.shared.modeRaw) interval=\(Settings.shared.interval)s onlyWhenIdle=\(Settings.shared.onlyWhenIdle) jitter=\(Settings.shared.humanJitter) distance=\(Settings.shared.distance)pt preventSleep=\(Settings.shared.preventSleep)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -813,10 +812,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard s.enabled else { return }
         if s.onlyWhenIdle {
             let act = CursorNudger.shared.currentActivity()
-            let timeSinceLastNudge = lastNudgeAt.map { Date().timeIntervalSince($0) } ?? 999.0
-            // If user is active AND a nudge occurred recently, wait;
-            // BUT if >= 15 seconds have elapsed without a nudge, ALWAYS nudge so 30s AFK detectors (like Kuro) never trigger!
-            if act.idleSeconds < s.idleThreshold && timeSinceLastNudge < 15.0 {
+            if act.idleSeconds < s.idleThreshold {
                 skipCount += 1
                 Log.write("skipped: user active (\(act.lastActionDescription) < threshold \(Int(s.idleThreshold))s)")
                 scheduleNextTick()

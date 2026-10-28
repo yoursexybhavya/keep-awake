@@ -27,7 +27,7 @@ version uses `pyobjc-framework-Quartz`, which Apple's own Python ships with.
 
 ## 0. The easiest way — the installer .dmg
 
-`Keep-Awake-1.4.1.dmg` (one level up from this folder) is a standard Apple Disk
+`Keep-Awake-1.4.2.dmg` (one level up from this folder) is a standard Apple Disk
 Image. Double-click it, then double-click **Install Keep Awake**:
 
 - If Apple's free Command Line Tools are present it compiles and installs the

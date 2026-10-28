@@ -111,13 +111,13 @@ def seconds_since_any_input() -> float:
 def post_move(x: float, y: float) -> None:
     """Reposition the cursor and inject a real mouse-moved event at (x, y)."""
     pt = CGPointMake(x, y)
-    CGWarpMouseCursorPosition(pt)
     event = CGEventCreateMouseEvent(
         kCGNullEventSource, kCGEventMouseMoved, pt, kCGMouseButtonLeft
     )
     if event is None:
         raise RuntimeError("CGEventCreateMouseEvent returned NULL")
     CGEventPost(kCGHIDEventTap, event)
+    CGWarpMouseCursorPosition(pt)
 
 
 def post_scroll(lines: int) -> None:

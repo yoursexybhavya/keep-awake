@@ -32,8 +32,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleDisplayName</key>        <string>Install Keep Awake</string>
   <key>CFBundleExecutable</key>         <string>installer</string>
   <key>CFBundleIdentifier</key>         <string>local.keepawake.installer</string>
-  <key>CFBundleShortVersionString</key> <string>1.4.1</string>
-  <key>CFBundleVersion</key>            <string>1.4.1</string>
+  <key>CFBundleShortVersionString</key> <string>1.4.2</string>
+  <key>CFBundleVersion</key>            <string>1.4.2</string>
   <key>CFBundlePackageType</key>        <string>APPL</string>
   <key>CFBundleIconFile</key>           <string>AppIcon</string>
   <key>LSMinimumSystemVersion</key>     <string>11.0</string>

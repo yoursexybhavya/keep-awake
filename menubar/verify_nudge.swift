@@ -1,5 +1,5 @@
 //
-// verify_nudge.swift — self-contained verification check for Keep Awake v1.4.1 universal anti-AFK engine.
+// verify_nudge.swift — self-contained verification check for Keep Awake v1.4.2 universal anti-AFK engine.
 // Run with: swift menubar/verify_nudge.swift
 //
 
@@ -59,10 +59,10 @@ for i in 0...24 {
     let offset = CGFloat(sin(progress * 2.0 * .pi) * Double(distance))
     let x = min(max(initial.x + offset, bounds.minX + 8), bounds.maxX - 8)
     let p = CGPoint(x: x, y: initial.y)
-    CGWarpMouseCursorPosition(p)
-    if let ev = CGEvent(mouseEventSource: src, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left) {
+    if let ev = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left) {
         ev.post(tap: .cghidEventTap)
     }
+    CGWarpMouseCursorPosition(p)
     let cur = CGEvent(source: nil)?.location ?? .zero
     let d = abs(cur.x - initial.x)
     if d > maxDisplacement { maxDisplacement = d }
@@ -71,15 +71,15 @@ for i in 0...24 {
 assert(maxDisplacement >= 25.0, "Slide displacement insufficient")
 
 // Micro-scroll (down + up)
-if let down = CGEvent(scrollWheelEvent2Source: src, units: .line, wheelCount: 1, wheel1: 1, wheel2: 0, wheel3: 0),
-   let up = CGEvent(scrollWheelEvent2Source: src, units: .line, wheelCount: 1, wheel1: -1, wheel2: 0, wheel3: 0) {
+if let down = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 1, wheel2: 0, wheel3: 0),
+   let up = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: -1, wheel2: 0, wheel3: 0) {
     down.post(tap: .cghidEventTap)
     up.post(tap: .cghidEventTap)
 }
 
 // Harmless F15 key down & up
-if let kdown = CGEvent(keyboardEventSource: src, virtualKey: 113, keyDown: true),
-   let kup = CGEvent(keyboardEventSource: src, virtualKey: 113, keyDown: false) {
+if let kdown = CGEvent(keyboardEventSource: nil, virtualKey: 113, keyDown: true),
+   let kup = CGEvent(keyboardEventSource: nil, virtualKey: 113, keyDown: false) {
     kdown.post(tap: .cghidEventTap)
     kup.post(tap: .cghidEventTap)
 }
@@ -88,6 +88,6 @@ let finalPos = CGEvent(source: nil)?.location ?? .zero
 let drift = hypot(finalPos.x - initial.x, finalPos.y - initial.y)
 assert(drift < 2.0, "Cursor drift after slide exceeded tolerance")
 print("    Max displacement: \(maxDisplacement)pt | Return drift: \(drift)pt")
-print("    AFK Bypass composite execution: PASS")
+print("    Anti-AFK composite execution: PASS")
 
-print("==> ALL v1.4.1 VERIFICATION CHECKS PASSED.")
+print("==> ALL v1.4.2 VERIFICATION CHECKS PASSED.")
