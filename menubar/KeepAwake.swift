@@ -9,13 +9,15 @@
 //  Zoom, corporate agents) never mark you AFK. Pauses automatically while you
 //  are actually using the Mac, so it never fights your own mouse.
 //
-//  v1.3: visible-by-default movement, auto-click channel, scroll channel,
-//        start-at-login LaunchAgent fallback, on-disk log, AFK diagnostics.
+//  v1.3.1: smooth animated slide & wiggle, hardware cursor warping,
+//          display sleep prevention assertion, App Nap blocker,
+//          movement distance selector, on-disk log, AFK diagnostics.
 //
 
 import Cocoa
 import CoreGraphics
 import ServiceManagement
+import IOKit.pwr_mgt
 
 // MARK: - Settings
 
@@ -23,22 +25,24 @@ final class Settings {
     static let shared = Settings()
 
     enum Mode: String, CaseIterable {
-        case jitter = "Jitter (invisible, 1 px)"
-        case circle = "Tiny circle"
+        case slide  = "Smooth slide (visible)"
         case wiggle = "Visible wiggle"
+        case circle = "Tiny circle"
         case roam   = "Roam the screen"
+        case jitter = "Jitter (invisible, 1 px)"
         case warp   = "Silent reposition (no event)"
         case scroll = "Scroll wheel down"
     }
 
-    @objc dynamic var enabled: Bool = true { didSet { save() } }
+    @objc dynamic var enabled: Bool = true { didSet { applySleepAssertion(); save() } }
     @objc dynamic var interval: Double = 30 { didSet { save() } }
     @objc dynamic var onlyWhenIdle: Bool = true { didSet { save() } }
     @objc dynamic var idleThreshold: Double = 5 { didSet { save() } }
-    @objc dynamic var distance: Double = 12 { didSet { save() } }
+    @objc dynamic var distance: Double = 35 { didSet { save() } }
     @objc dynamic var scrollLines: Int = 3 { didSet { save() } }
     @objc dynamic var launchAtLogin: Bool = false { didSet { applyLaunchAtLogin(); save() } }
-    @objc dynamic var modeRaw: String = Mode.wiggle.rawValue { didSet { save() } }
+    @objc dynamic var preventSleep: Bool = true { didSet { applySleepAssertion(); save() } }
+    @objc dynamic var modeRaw: String = Mode.slide.rawValue { didSet { save() } }
 
     // Auto-click channel
     @objc dynamic var autoClick: Bool = false { didSet { save() } }
@@ -48,9 +52,20 @@ final class Settings {
     @objc dynamic var clickPointX: Double = 0 { didSet { save() } }
     @objc dynamic var clickPointY: Double = 0 { didSet { save() } }
 
-    var mode: Mode { Mode(rawValue: modeRaw) ?? .wiggle }
+    var mode: Mode {
+        if let m = Mode(rawValue: modeRaw) { return m }
+        if modeRaw.contains("slide") { return .slide }
+        if modeRaw.contains("wiggle") { return .wiggle }
+        if modeRaw.contains("circle") { return .circle }
+        if modeRaw.contains("roam") { return .roam }
+        if modeRaw.contains("jitter") { return .jitter }
+        if modeRaw.contains("warp") { return .warp }
+        if modeRaw.contains("scroll") { return .scroll }
+        return .slide
+    }
 
     private let defaults = UserDefaults.standard
+    private var sleepAssertionID: IOPMAssertionID = 0
 
     private init() { load() }
 
@@ -59,10 +74,16 @@ final class Settings {
         if defaults.object(forKey: "interval") != nil { interval = defaults.double(forKey: "interval") }
         if defaults.object(forKey: "onlyWhenIdle") != nil { onlyWhenIdle = defaults.bool(forKey: "onlyWhenIdle") }
         if defaults.object(forKey: "idleThreshold") != nil { idleThreshold = defaults.double(forKey: "idleThreshold") }
-        if defaults.object(forKey: "distance") != nil { distance = defaults.double(forKey: "distance") }
+        if defaults.object(forKey: "distance") != nil {
+            let d = defaults.double(forKey: "distance")
+            distance = d > 0 ? d : 35
+        }
         if defaults.object(forKey: "scrollLines") != nil { scrollLines = defaults.integer(forKey: "scrollLines") }
         if defaults.object(forKey: "launchAtLogin") != nil { launchAtLogin = defaults.bool(forKey: "launchAtLogin") }
-        if let raw = defaults.string(forKey: "mode"), Mode(rawValue: raw) != nil { modeRaw = raw }
+        if defaults.object(forKey: "preventSleep") != nil { preventSleep = defaults.bool(forKey: "preventSleep") }
+        if let raw = defaults.string(forKey: "mode") {
+            modeRaw = raw
+        }
         if defaults.object(forKey: "autoClick") != nil { autoClick = defaults.bool(forKey: "autoClick") }
         if defaults.object(forKey: "clickInterval") != nil { clickInterval = defaults.double(forKey: "clickInterval") }
         if defaults.object(forKey: "clickAtSavedPoint") != nil { clickAtSavedPoint = defaults.bool(forKey: "clickAtSavedPoint") }
@@ -79,6 +100,7 @@ final class Settings {
         defaults.set(distance, forKey: "distance")
         defaults.set(scrollLines, forKey: "scrollLines")
         defaults.set(launchAtLogin, forKey: "launchAtLogin")
+        defaults.set(preventSleep, forKey: "preventSleep")
         defaults.set(modeRaw, forKey: "mode")
         defaults.set(autoClick, forKey: "autoClick")
         defaults.set(clickInterval, forKey: "clickInterval")
@@ -91,16 +113,44 @@ final class Settings {
     func resetToDefaults() {
         let keepLogin = launchAtLogin
         for k in ["enabled", "interval", "onlyWhenIdle", "idleThreshold", "distance",
-                  "scrollLines", "mode", "autoClick", "clickInterval",
+                  "scrollLines", "mode", "preventSleep", "autoClick", "clickInterval",
                   "clickAtSavedPoint", "hasClickPoint", "clickPointX", "clickPointY"] {
             defaults.removeObject(forKey: k)
         }
         enabled = true; interval = 30; onlyWhenIdle = true; idleThreshold = 5
-        distance = 12; scrollLines = 3; modeRaw = Mode.wiggle.rawValue
+        distance = 35; scrollLines = 3; modeRaw = Mode.slide.rawValue
+        preventSleep = true
         autoClick = false; clickInterval = 5; clickAtSavedPoint = false
         hasClickPoint = false; clickPointX = 0; clickPointY = 0
         launchAtLogin = keepLogin
         save()
+        applySleepAssertion()
+    }
+
+    // MARK: display / system sleep prevention assertion
+
+    func applySleepAssertion() {
+        if enabled && preventSleep {
+            if sleepAssertionID == 0 {
+                let success = IOPMAssertionCreateWithName(
+                    kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                    IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                    "Keep Awake Display Sleep Prevention" as CFString,
+                    &sleepAssertionID
+                )
+                if success == kIOReturnSuccess {
+                    Log.write("display sleep prevention acquired (ID: \(sleepAssertionID))")
+                } else {
+                    sleepAssertionID = 0
+                }
+            }
+        } else {
+            if sleepAssertionID != 0 {
+                IOPMAssertionRelease(sleepAssertionID)
+                Log.write("display sleep prevention released (ID: \(sleepAssertionID))")
+                sleepAssertionID = 0
+            }
+        }
     }
 
     // MARK: start at login — SMAppService first, LaunchAgent as a fallback
@@ -188,7 +238,8 @@ enum Log {
 
 final class CursorNudger {
     private var step = 0
-    private var origin: CGPoint?
+    private var isAnimating = false
+    private let animQueue = DispatchQueue(label: "local.keepawake.anim", qos: .userInteractive)
 
     static let shared = CursorNudger()
 
@@ -205,65 +256,164 @@ final class CursorNudger {
                                                               eventType: anyInput))
     }
 
-    func nudge() {
+    /// Forcefully updates the hardware cursor position and injects HID mouse-moved event.
+    private func postCursor(at p: CGPoint) {
+        CGWarpMouseCursorPosition(p)
+        if let ev = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                            mouseCursorPosition: p, mouseButton: .left) {
+            ev.post(tap: .cghidEventTap)
+        }
+    }
+
+    /// Smooth horizontal slide that glides right, crosses center to left, and glides back to start.
+    private func performSlide(from start: CGPoint, distance: CGFloat, bounds: CGRect) {
+        let steps = 24
+        let delayUs: useconds_t = 16000 // ~60 fps
+        for i in 0...steps {
+            let progress = Double(i) / Double(steps)
+            let offset = CGFloat(sin(progress * 2.0 * .pi) * Double(distance))
+            let x = min(max(start.x + offset, bounds.minX + 8), bounds.maxX - 8)
+            let p = CGPoint(x: x, y: start.y)
+            postCursor(at: p)
+            usleep(delayUs)
+        }
+    }
+
+    /// Energetic multi-cycle shake animation.
+    private func performWiggle(from start: CGPoint, distance: CGFloat, bounds: CGRect) {
+        let steps = 16
+        let delayUs: useconds_t = 14000
+        for i in 0...steps {
+            let progress = Double(i) / Double(steps)
+            let offset = CGFloat(sin(progress * 4.0 * .pi) * Double(distance))
+            let x = min(max(start.x + offset, bounds.minX + 8), bounds.maxX - 8)
+            let p = CGPoint(x: x, y: start.y)
+            postCursor(at: p)
+            usleep(delayUs)
+        }
+    }
+
+    /// Smooth circular orbit tangent to the starting position.
+    private func performCircle(from start: CGPoint, radius: CGFloat, bounds: CGRect) {
+        let steps = 24
+        let delayUs: useconds_t = 16000
+        for i in 0...steps {
+            let progress = Double(i) / Double(steps)
+            let angle = progress * 2.0 * .pi
+            let x = min(max(start.x + radius * CGFloat(sin(angle)), bounds.minX + 8), bounds.maxX - 8)
+            let y = min(max(start.y - radius * CGFloat(1 - cos(angle)), bounds.minY + 8), bounds.maxY - 8)
+            let p = CGPoint(x: x, y: y)
+            postCursor(at: p)
+            usleep(delayUs)
+        }
+    }
+
+    /// Smoothly glides the cursor to a pseudo-random location on screen using smoothstep.
+    private func performRoam(from start: CGPoint, step: Int, bounds: CGRect) {
+        let sa = sin(Double(step) * 12.9898) * 43758.5453
+        let sb = sin(Double(step) * 78.233) * 12345.6789
+        let fx = 0.25 + 0.5 * (sa - floor(sa))
+        let fy = 0.25 + 0.5 * (sb - floor(sb))
+        let target = CGPoint(x: bounds.minX + bounds.width * fx,
+                             y: bounds.minY + bounds.height * fy)
+        let steps = 24
+        let delayUs: useconds_t = 16000
+        for i in 1...steps {
+            let t = Double(i) / Double(steps)
+            let ease = t * t * (3 - 2 * t)
+            let x = start.x + (target.x - start.x) * CGFloat(ease)
+            let y = start.y + (target.y - start.y) * CGFloat(ease)
+            postCursor(at: CGPoint(x: x, y: y))
+            usleep(delayUs)
+        }
+    }
+
+    /// Instantaneous 1-pixel hop.
+    private func performJitter(from start: CGPoint, distance: CGFloat, step: Int, bounds: CGRect) {
+        let dx = (step % 2 == 0) ? distance : -distance
+        let p = CGPoint(x: min(max(start.x + dx, bounds.minX + 8), bounds.maxX - 8), y: start.y)
+        postCursor(at: p)
+    }
+
+    /// Silent hardware warp without posting HID event.
+    private func performWarp(from start: CGPoint, distance: CGFloat, step: Int, bounds: CGRect) {
+        let dx = (step % 2 == 0) ? distance : -distance
+        let p = CGPoint(x: min(max(start.x + dx, bounds.minX + 8), bounds.maxX - 8), y: start.y)
+        CGWarpMouseCursorPosition(p)
+    }
+
+    /// Genuine scroll-wheel event.
+    private func performScroll(lines: Int) {
+        if let ev = CGEvent(scrollWheelEvent2Source: nil, units: .line,
+                            wheelCount: 1, wheel1: Int32(lines),
+                            wheel2: 0, wheel3: 0) {
+            ev.post(tap: .cghidEventTap)
+        }
+    }
+
+    func nudge(forceVisible: Bool = false) {
         let s = Settings.shared
         let bounds = CGDisplayBounds(CGMainDisplayID())
         let here = currentLocation()
         step += 1
+        let currentStep = step
 
-        var target = here
+        let activeMode: Settings.Mode
+        if forceVisible {
+            activeMode = (s.mode == .scroll || s.mode == .jitter || s.mode == .warp) ? .slide : s.mode
+        } else {
+            activeMode = s.mode
+        }
 
-        switch s.mode {
-        case .jitter:
-            let dx = (step % 2 == 0) ? s.distance : -s.distance
-            target = CGPoint(x: here.x + dx, y: here.y)
-
-        case .circle:
-            if origin == nil { origin = here }
-            let o = origin!
-            let a = Double(step % 36) * (2 * .pi / 36)
-            target = CGPoint(x: o.x + s.distance * cos(a), y: o.y + s.distance * sin(a))
-
+        let baseDist = CGFloat(s.distance)
+        let effectiveDistance: CGFloat
+        switch activeMode {
+        case .slide:
+            effectiveDistance = max(baseDist, 35)
         case .wiggle:
-            if origin == nil { origin = here }
-            let o = origin!
-            let phase = step % 3
-            let dx: Double = phase == 0 ? s.distance : (phase == 1 ? -s.distance : 0)
-            target = CGPoint(x: o.x + dx, y: o.y)
-            if phase == 2 { origin = nil }
+            effectiveDistance = max(baseDist, 20)
+        case .circle:
+            effectiveDistance = max(baseDist, 25)
+        case .jitter:
+            effectiveDistance = 1
+        default:
+            effectiveDistance = baseDist
+        }
 
-        case .roam:
-            let sa = sin(Double(step) * 12.9898) * 43758.5453
-            let sb = sin(Double(step) * 78.233) * 12345.6789
-            let fx = 0.25 + 0.5 * (sa - floor(sa))
-            let fy = 0.25 + 0.5 * (sb - floor(sb))
-            target = CGPoint(x: bounds.minX + bounds.width * fx,
-                             y: bounds.minY + bounds.height * fy)
-
-        case .warp:
-            let dx = (step % 2 == 0) ? s.distance : -s.distance
-            CGWarpMouseCursorPosition(CGPoint(x: here.x + dx, y: here.y))
-            return
-
-        case .scroll:
-            // A genuine wheel event — exactly what the middle button produces.
-            // Scrolls whatever window is under the cursor, once per interval.
-            if let ev = CGEvent(scrollWheelEvent2Source: nil, units: .line,
-                                wheelCount: 1, wheel1: Int32(s.scrollLines),
-                                wheel2: 0, wheel3: 0) {
-                ev.post(tap: .cghidEventTap)
-            }
+        if activeMode == .scroll {
+            performScroll(lines: s.scrollLines)
             return
         }
 
-        // Keep it on screen with a small margin.
-        let m: CGFloat = 12
-        target.x = min(max(target.x, bounds.minX + m), bounds.maxX - m)
-        target.y = min(max(target.y, bounds.minY + m), bounds.maxY - m)
+        if activeMode == .warp {
+            performWarp(from: here, distance: effectiveDistance, step: currentStep, bounds: bounds)
+            return
+        }
 
-        if let ev = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
-                            mouseCursorPosition: target, mouseButton: .left) {
-            ev.post(tap: .cghidEventTap)
+        if activeMode == .jitter {
+            performJitter(from: here, distance: effectiveDistance, step: currentStep, bounds: bounds)
+            return
+        }
+
+        // Smooth animated modes run on animQueue so main thread and UI remain 100% responsive
+        animQueue.async { [weak self] in
+            guard let self = self else { return }
+            guard !self.isAnimating else { return }
+            self.isAnimating = true
+            defer { self.isAnimating = false }
+
+            switch activeMode {
+            case .slide:
+                self.performSlide(from: here, distance: effectiveDistance, bounds: bounds)
+            case .wiggle:
+                self.performWiggle(from: here, distance: effectiveDistance, bounds: bounds)
+            case .circle:
+                self.performCircle(from: here, radius: effectiveDistance, bounds: bounds)
+            case .roam:
+                self.performRoam(from: here, step: currentStep, bounds: bounds)
+            default:
+                break
+            }
         }
     }
 
@@ -288,10 +438,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var skipCount = 0
     private var clickCount = 0
     private var lastNudgeAt: Date?
+    private var appNapActivity: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu-bar-only app: no Dock icon, no main window.
         NSApp.setActivationPolicy(.accessory)
+
+        // Disable App Nap so background timers are never coalesced or paused
+        appNapActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+            reason: "Keep Awake anti-AFK timers"
+        )
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         updateStatusIcon()
@@ -299,10 +456,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startTimer()
         startClickTimer()
 
+        // Apply display/system sleep prevention assertion
+        Settings.shared.applySleepAssertion()
+
         // Re-assert the login item in case a macOS update dropped it.
         if Settings.shared.launchAtLogin { Settings.shared.applyLaunchAtLogin() }
 
-        Log.write("launched v1.3 — mode=\(Settings.shared.modeRaw) interval=\(Settings.shared.interval)s autoClick=\(Settings.shared.autoClick)")
+        Log.write("launched v1.3.1 — mode=\(Settings.shared.modeRaw) interval=\(Settings.shared.interval)s distance=\(Settings.shared.distance)pt autoClick=\(Settings.shared.autoClick) preventSleep=\(Settings.shared.preventSleep)")
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        Settings.shared.enabled = false
+        if let activity = appNapActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            appNapActivity = nil
+        }
     }
 
     // MARK: icon
@@ -355,18 +523,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         intervalItem.submenu = intervalMenu
         menu.addItem(intervalItem)
 
-        // Mode submenu
+        // Movement mode submenu
         let modeItem = NSMenuItem(title: "Movement", action: nil, keyEquivalent: "")
         let modeMenu = NSMenu()
         for m in Settings.Mode.allCases {
             let mi = NSMenuItem(title: m.rawValue, action: #selector(pickMode(_:)), keyEquivalent: "")
             mi.target = self
             mi.representedObject = m.rawValue
-            mi.state = (s.modeRaw == m.rawValue) ? .on : .off
+            mi.state = (s.mode == m) ? .on : .off
             modeMenu.addItem(mi)
         }
         modeItem.submenu = modeMenu
         menu.addItem(modeItem)
+
+        // Movement distance submenu
+        let distItem = NSMenuItem(title: "Distance", action: nil, keyEquivalent: "")
+        let distMenu = NSMenu()
+        for (label, pts) in [("Subtle (15 pt)", 15.0),
+                             ("Normal (35 pt)", 35.0),
+                             ("Large (60 pt)", 60.0),
+                             ("Extra large (100 pt)", 100.0)] {
+            let mi = NSMenuItem(title: label, action: #selector(pickDistance(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = pts
+            mi.state = (abs(s.distance - pts) < 1.0) ? .on : .off
+            distMenu.addItem(mi)
+        }
+        distItem.submenu = distMenu
+        menu.addItem(distItem)
 
         // Scroll amount — only relevant in scroll mode
         if s.mode == .scroll {
@@ -384,12 +568,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(scrollItem)
         }
 
-        // Only-when-idle
+        // Only-when-idle toggle
         let idleItem = NSMenuItem(title: "Only when I'm idle",
                                   action: #selector(toggleIdleOnly), keyEquivalent: "")
         idleItem.target = self
         idleItem.state = s.onlyWhenIdle ? .on : .off
         menu.addItem(idleItem)
+
+        // Prevent Mac display sleep
+        let sleepItem = NSMenuItem(title: "Prevent Mac from sleeping",
+                                   action: #selector(togglePreventSleep), keyEquivalent: "")
+        sleepItem.target = self
+        sleepItem.state = s.preventSleep ? .on : .off
+        menu.addItem(sleepItem)
 
         menu.addItem(.separator())
 
@@ -434,8 +625,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loginItem.state = s.launchAtLogin ? .on : .off
         menu.addItem(loginItem)
 
-        menu.addItem(NSMenuItem(title: "Nudge now", action: #selector(nudgeNow), keyEquivalent: "n"))
-        menu.items.last?.target = self
+        let nudgeNowItem = NSMenuItem(title: "Nudge now", action: #selector(nudgeNow), keyEquivalent: "n")
+        nudgeNowItem.target = self
+        menu.addItem(nudgeNowItem)
 
         let diag = NSMenuItem(title: "Why am I still AFK? Run diagnostics…",
                               action: #selector(runDiagnostics), keyEquivalent: "d")
@@ -502,6 +694,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let idle = CursorNudger.shared.secondsSinceInput()
             guard idle >= s.idleThreshold else {
                 skipCount += 1
+                Log.write("skipped: user active (idle \(String(format: "%.1f", idle))s < threshold \(Int(s.idleThreshold))s)")
                 return   // user is active, don't interfere
             }
         }
@@ -556,6 +749,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
+    @objc private func pickDistance(_ sender: NSMenuItem) {
+        guard let d = sender.representedObject as? Double else { return }
+        Settings.shared.distance = d
+        Log.write("distance -> \(Int(d))pt")
+        rebuildMenu()
+    }
+
     @objc private func pickScrollLines(_ sender: NSMenuItem) {
         guard let n = sender.representedObject as? Int else { return }
         Settings.shared.scrollLines = n
@@ -564,6 +764,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleIdleOnly() {
         Settings.shared.onlyWhenIdle.toggle()
+        rebuildMenu()
+    }
+
+    @objc private func togglePreventSleep() {
+        Settings.shared.preventSleep.toggle()
         rebuildMenu()
     }
 
@@ -602,9 +807,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func nudgeNow() {
-        CursorNudger.shared.nudge()
+        CursorNudger.shared.nudge(forceVisible: true)
         nudgeCount += 1
         lastNudgeAt = Date()
+        Log.write("nudge now (#\(nudgeCount)) mode=\(Settings.shared.modeRaw)")
         rebuildMenu()
     }
 
@@ -620,13 +826,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func runDiagnostics() {
         let n = CursorNudger.shared
         let before = n.secondsSinceInput()
-        n.nudge()                                   // force one real nudge
+        n.nudge(forceVisible: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self = self else { return }
             let after = n.secondsSinceInput()
             let s = Settings.shared
-            var m = "Nudges posted: \(self.nudgeCount)   Skipped (you were active): \(self.skipCount)\n"
+            var m = "Nudges posted: \(self.nudgeCount)   Skipped (active): \(self.skipCount)\n"
             m += "Auto-clicks posted: \(self.clickCount)\n"
+            m += "Display sleep prevention: \(s.preventSleep ? "Active" : "Disabled")\n"
             m += "System idle BEFORE test nudge: \(String(format: "%.1f", before))s\n"
             m += "System idle 0.6s AFTER test nudge: \(String(format: "%.1f", after))s\n\n"
             if after < before || after < 1.0 {
@@ -636,7 +843,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             m += "Movement: \(s.mode.rawValue) · distance \(Int(s.distance))pt · interval \(Int(s.interval))s\n"
             m += "Auto-click: \(s.autoClick ? "ON every \(Int(s.clickInterval))s" : "OFF")\n\n"
-            m += "If your AFK app STILL says away while this dialog shows ✅, that app ignores synthetic events (anti-spoofing). Turn ON Auto-click and/or pick Scroll wheel movement — some watchers only accept clicks or wheel input. If it still says away, it tracks screenshots / keystroke content / window focus, which no cursor tool can reset."
+            m += "Tip: When testing, check that 'Only when I\'m idle' isn\'t pausing movement while you touch the mouse, or use 'Nudge now' (⌘N) to test movement immediately."
             let a = NSAlert()
             a.messageText = "Keep Awake diagnostics"
             a.informativeText = m
@@ -649,6 +856,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quit() {
         timer?.invalidate()
         clickTimer?.invalidate()
+        Settings.shared.enabled = false
+        if let activity = appNapActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            appNapActivity = nil
+        }
         NSApp.terminate(nil)
     }
 }

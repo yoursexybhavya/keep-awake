@@ -84,9 +84,11 @@ def seconds_since_any_input() -> float:
 
 
 def post_move(x: float, y: float) -> None:
-    """Inject a real mouse-moved event at (x, y)."""
+    """Reposition the cursor and inject a real mouse-moved event at (x, y)."""
+    pt = CGPointMake(x, y)
+    CGWarpMouseCursorPosition(pt)
     event = CGEventCreateMouseEvent(
-        kCGNullEventSource, kCGEventMouseMoved, CGPointMake(x, y), kCGMouseButtonLeft
+        kCGNullEventSource, kCGEventMouseMoved, pt, kCGMouseButtonLeft
     )
     if event is None:
         raise RuntimeError("CGEventCreateMouseEvent returned NULL")
@@ -179,8 +181,8 @@ class Nudger:
                 self.origin[1] + self.distance * math.sin(angle),
             )
 
-        elif self.mode == "wiggle":
-            # Visible left-right wiggle, then return home.
+        elif self.mode in ("wiggle", "slide"):
+            # Visible left-right wiggle or slide, then return home.
             if self.origin is None:
                 self.origin = (x, y)
             phase = self.step % 3  # 0 -> right, 1 -> left, 2 -> home
@@ -205,7 +207,7 @@ class Nudger:
         else:
             raise ValueError(f"unknown mode: {self.mode}")
 
-        if self.mode == "wiggle" and self.step % 3 == 2:
+        if self.mode in ("wiggle", "slide") and self.step % 3 == 2:
             # returning home — reset the remembered origin so it follows the user
             self.origin = None
 
@@ -243,17 +245,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--mode",
-        choices=["jitter", "circle", "wiggle", "roam", "warp", "scroll"],
-        default="wiggle",
-        help="wiggle=visible shake (default), jitter=invisible 1px hop, "
-        "circle=tiny orbit, roam=drift around screen, warp=silent reposition "
-        "(no event), scroll=turn the mouse wheel down every interval",
+        choices=["slide", "wiggle", "jitter", "circle", "roam", "warp", "scroll"],
+        default="slide",
+        help="slide=smooth visible glide (default), wiggle=visible shake, "
+        "jitter=invisible 1px hop, circle=tiny orbit, roam=drift around screen, "
+        "warp=silent reposition (no event), scroll=turn the mouse wheel down every interval",
     )
     p.add_argument(
         "--distance",
         type=float,
-        default=12.0,
-        help="how far the cursor moves per nudge, in points (visible >= ~6)",
+        default=35.0,
+        help="how far the cursor moves per nudge, in points (default: 35)",
     )
     p.add_argument(
         "--scroll-lines",
@@ -327,6 +329,18 @@ def main() -> int:
         if args.mode == "scroll":
             post_scroll(args.scroll_lines)
             return f"wheel {args.scroll_lines:+d} lines"
+        if args.mode in ("slide", "wiggle"):
+            start_x, start_y = current_position()
+            dist = max(args.distance, 35.0 if args.mode == "slide" else 20.0)
+            steps = 24 if args.mode == "slide" else 16
+            cycles = 1.0 if args.mode == "slide" else 2.0
+            for i in range(steps + 1):
+                prog = i / steps
+                offset = math.sin(prog * 2.0 * math.pi * cycles) * dist
+                nx, ny = clamp_to_screen(start_x + offset, start_y, rect)
+                post_move(nx, ny)
+                time.sleep(0.015)
+            return f"{args.mode} ({start_x:.1f},{start_y:.1f})"
         x, y = nudger.next_point(rect)
         if args.mode == "warp":
             warp(x, y)

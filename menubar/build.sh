@@ -23,7 +23,7 @@ rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 
 swiftc -O -whole-module-optimization \
-  -framework Cocoa -framework CoreGraphics -framework ServiceManagement \
+  -framework Cocoa -framework CoreGraphics -framework ServiceManagement -framework IOKit \
   -o "$BUNDLE/Contents/MacOS/KeepAwake" \
   "$SWIFT_SRC"
 
@@ -36,12 +36,13 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key>       <string>$APP_NAME</string>
   <key>CFBundleExecutable</key>        <string>KeepAwake</string>
   <key>CFBundleIdentifier</key>        <string>local.keepawake.menubar</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundleVersion</key>           <string>1</string>
+  <key>CFBundleShortVersionString</key><string>1.3.1</string>
+  <key>CFBundleVersion</key>           <string>1.3.1</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>
   <key>LSMinimumSystemVersion</key>    <string>11.0</string>
   <key>LSUIElement</key>               <true/>
   <key>NSHighResolutionCapable</key>   <true/>
+  <key>NSSupportsAppNap</key>          <false/>
   <key>NSHumanReadableCopyright</key>  <string>Personal use.</string>
 </dict>
 </plist>

@@ -81,11 +81,11 @@ python3 keep_awake.py --help                    # everything
 
 **Movement modes**
 
-- `wiggle` *(default since v1.3)* — a visible left-right shake, then back home.
-  You can *see* it working, and displacement-based watchers reset on it.
+- `slide` *(default since v1.3.1)* — smooth, elegant visible glide across the screen and back home. You can clearly see it sliding smoothly without interrupting where your cursor was parked.
+- `wiggle` — energetic multi-cycle left-right shake, then back home. You can *see* it working, and displacement-based watchers reset on it.
 - `jitter` — 1-point hop left/right. Invisible; use only if you must not see it.
-- `circle` — a tiny orbit around the current position.
-- `roam` — moves the cursor to a different part of the screen each time.
+- `circle` — a smooth orbit around the current position.
+- `roam` — smoothly glides the cursor to a different part of the screen each time.
 - `scroll` — turns the mouse wheel once per interval (a real
   `CGEventScrollWheelEvent`, identical to your middle button). Scrolls
   whatever window is under the cursor, N lines per tick:
@@ -155,11 +155,13 @@ If `swiftc` is missing, the build script triggers
   cup also changes (filled = ON, outline = OFF) so you can see the state
   without opening the menu. `⌘P`
 - **Interval** — 1 / 2 / 5 / 10 / 15 / 20 / 30 / 45 / 60 / 120 seconds
-- **Movement** — Visible wiggle (default) · Jitter · Tiny circle · Roam ·
-  Silent warp · **Scroll wheel down** (with a *Scroll amount* submenu:
+- **Movement** — Smooth slide (visible, default) · Visible wiggle · Tiny circle · Roam ·
+  Silent warp · Jitter · **Scroll wheel down** (with a *Scroll amount* submenu:
   1–20 lines per interval). Heads-up: a wheel event really scrolls the
   window under your cursor — park the pointer over something scroll-safe first.
+- **Distance** — Subtle (15 pt) · Normal (35 pt) · Large (60 pt) · Extra large (100 pt)
 - **Only when I'm idle** — on by default, so it never fights your own mouse
+- **Prevent Mac from sleeping** — on by default, keeps display and system awake with an IOKit power assertion
 - **Auto-click: ON / OFF** — injects a real left click on its own timer
   (default every 5 s), with *Click interval* (2/5/10/30 s) and *Click at:
   cursor / saved point* plus *Save cursor position as click point*. Use the
@@ -167,12 +169,12 @@ If `swiftc` is missing, the build script triggers
 - **Start at login** — survives reboots. Uses Apple's SMAppService and, if
   that refuses (common for ad-hoc-signed apps), automatically falls back to a
   user LaunchAgent at `~/Library/LaunchAgents/local.keepawake.menubar.plist`.
-- **Nudge now** — test it on demand. `⌘N`
+- **Nudge now** — test it on demand immediately (`⌘N`).
 - **Why am I still AFK? Run diagnostics…** — `⌘D`. Forces a nudge, measures
   whether macOS's idle timer actually resets, counts skips, and tells you
-  which class of watcher you're dealing with. `⌘D`
-- **Reset settings to defaults** — one click back to sane v1.3 defaults
-  (visible wiggle, 12 pt, 30 s).
+  which class of watcher you're dealing with.
+- **Reset settings to defaults** — one click back to sane v1.3.1 defaults
+  (smooth slide, 35 pt, 30 s, sleep prevention active).
 - A live status line showing ON/OFF, idle seconds, nudge and click counts
 - Everything is also logged to `~/Library/Logs/KeepAwake.log`
 
