@@ -353,6 +353,7 @@ final class CursorNudger {
         if let ev = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
                             mouseCursorPosition: p, mouseButton: .left) {
             ev.post(tap: .cghidEventTap)
+            ev.post(tap: .cgSessionEventTap)
         }
         CGWarpMouseCursorPosition(p)
     }
@@ -362,7 +363,9 @@ final class CursorNudger {
         if let kdown = CGEvent(keyboardEventSource: nil, virtualKey: 113, keyDown: true),
            let kup = CGEvent(keyboardEventSource: nil, virtualKey: 113, keyDown: false) {
             kdown.post(tap: .cghidEventTap)
+            kdown.post(tap: .cgSessionEventTap)
             kup.post(tap: .cghidEventTap)
+            kup.post(tap: .cgSessionEventTap)
         }
     }
 
@@ -461,6 +464,7 @@ final class CursorNudger {
                 // Also set continuous pixel delta for modern scroll views (browsers, Electron, Cocoa)
                 ev.setIntegerValueField(CGEventField(rawValue: 99)!, value: -25)
                 ev.post(tap: .cghidEventTap)
+                ev.post(tap: .cgSessionEventTap)
             }
             usleep(18000)
         }
@@ -562,9 +566,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Settings.shared.applySleepAssertion()
         if Settings.shared.launchAtLogin { Settings.shared.applyLaunchAtLogin() }
 
-        let opts: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-        let isTrusted = AXIsProcessTrustedWithOptions(opts)
-        Log.write("launched v1.4.2 — mode=\(Settings.shared.modeRaw) interval=\(Settings.shared.interval)s onlyWhenIdle=\(Settings.shared.onlyWhenIdle) jitter=\(Settings.shared.humanJitter) distance=\(Settings.shared.distance)pt preventSleep=\(Settings.shared.preventSleep) axTrusted=\(isTrusted)")
+        Log.write("launched v1.4.2 — mode=\(Settings.shared.modeRaw) interval=\(Settings.shared.interval)s onlyWhenIdle=\(Settings.shared.onlyWhenIdle) jitter=\(Settings.shared.humanJitter) distance=\(Settings.shared.distance)pt preventSleep=\(Settings.shared.preventSleep)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -601,13 +603,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
-
-        if !AXIsProcessTrusted() {
-            let permItem = NSMenuItem(title: "⚠️ Grant Accessibility Permission...", action: #selector(openAccessibilitySettings), keyEquivalent: "")
-            permItem.target = self
-            menu.addItem(permItem)
-            menu.addItem(.separator())
-        }
 
         let toggle = NSMenuItem(title: s.enabled ? "Nudging: ON" : "Nudging: OFF",
                                 action: #selector(toggleEnabled), keyEquivalent: "p")
@@ -913,12 +908,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
-    @objc private func openAccessibilitySettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
     @objc private func toggleClickTarget() {
         Settings.shared.clickAtSavedPoint.toggle()
         rebuildMenu()
@@ -982,7 +971,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if afterAct.idleSeconds < 1.5 || afterAct.hardwareIdle < 1.0 {
                 m += "✅ AFK Protection Active: Hardware & system idle timers successfully reset on every nudge across all modes.\n"
             } else {
-                m += "⚠️ Notice: Check Accessibility permissions if idle counter did not reset.\n"
+                m += "⚠️ Notice: Idle timer did not reset. Try 'Nudge now' (⌘N) to test immediately.\n"
             }
             let a = NSAlert()
             a.messageText = "Keep Awake Diagnostics"
